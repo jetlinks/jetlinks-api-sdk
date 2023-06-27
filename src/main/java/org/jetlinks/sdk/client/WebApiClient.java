@@ -3,11 +3,8 @@ package org.jetlinks.sdk.client;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-import org.jetlinks.sdk.model.ApiRequest;
 import org.jetlinks.sdk.model.ApiResponse;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.core.ResolvableType;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.util.unit.DataSize;
@@ -19,10 +16,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 @Slf4j
-public class WebApiClient implements ApiClient {
+public class WebApiClient extends AbstractApiClient {
 
     private final WebClient apiClient;
 
+    @Getter
     private final Duration requestTimeout;
 
     public WebApiClient(ClientConfig clientConfig) {
@@ -51,6 +49,11 @@ public class WebApiClient implements ApiClient {
         } else {
             apiClient = signClient;
         }
+    }
+
+    @Override
+    public WebClient getWebClient() {
+        return apiClient;
     }
 
     private static class TokenModRequestFilterFunction implements ExchangeFilterFunction {
@@ -110,48 +113,6 @@ public class WebApiClient implements ApiClient {
     public static class TokenInfo {
         private String token;
         private long expires = 3600;
-    }
-
-    @Override
-    public <T> ApiResponse<T> request(ApiRequest<T> request) {
-        return request(request, requestTimeout);
-    }
-
-    @Override
-    public <T> ApiResponse<T> request(ApiRequest<T> request,
-                                      Duration timeout) {
-        return requestAsync(request).block(timeout);
-    }
-
-    @Override
-    public <T> Mono<ApiResponse<T>> requestAsync(ApiRequest<T> request) {
-        WebClient.RequestBodySpec spec = apiClient
-                .method(request.method())
-                .uri(request.uri(), builder -> {
-                    if (null != request.parameters()) {
-                        return builder
-                                .queryParams(request.parameters())
-                                .build();
-                    }
-                    return builder.build();
-                });
-        if (request.method() == HttpMethod.PATCH
-                || request.method() == HttpMethod.POST
-                || request.method() == HttpMethod.PUT) {
-            if (request.body() != null) {
-                spec.contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(request.body());
-            }
-        }
-        return spec
-                .exchangeToMono(response -> response
-                        .bodyToMono(ParameterizedTypeReference.forType(
-                                ResolvableType
-                                        .forClassWithGenerics(ApiResponse.class,
-                                                              request.responseType())
-                                        .getType()
-                        )))
-                ;
     }
 
 
