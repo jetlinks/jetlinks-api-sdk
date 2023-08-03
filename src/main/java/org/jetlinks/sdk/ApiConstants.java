@@ -6,6 +6,5 @@ public interface ApiConstants {
         String clientId= "X-Client-Id";
         String timestamp= "X-Timestamp";
         String sign= "X-Sign";
-
     }
 }

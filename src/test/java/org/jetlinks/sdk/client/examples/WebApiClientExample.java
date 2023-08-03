@@ -13,15 +13,17 @@ import org.jetlinks.sdk.model.PagerResult;
 import org.jetlinks.sdk.model.SimpleApiRequest;
 import org.jetlinks.sdk.model.device.DeviceInfo;
 import org.jetlinks.sdk.model.device.QueryDeviceRequest;
+import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
+import org.springframework.web.reactive.function.client.WebClient;
 
 public class WebApiClientExample {
 
     public static void main(String[] args) {
         ClientConfig clientConfig = new ClientConfig(
-                "http://localhost:9000/jetlinks",
-                "DaYsxpiWSfdTAPJyKW8rP2WAGyWErnsR",
-                "test"
+                "http://localhost:8848",
+                "adcmin",
+                "admin"
         );
 //        clientConfig.setTokenMod(true);
 
