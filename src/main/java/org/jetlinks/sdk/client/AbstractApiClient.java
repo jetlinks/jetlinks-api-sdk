@@ -1,5 +1,6 @@
 package org.jetlinks.sdk.client;
 
+import org.hswebframework.web.exception.BusinessException;
 import org.jetlinks.sdk.model.ApiRequest;
 import org.jetlinks.sdk.model.ApiResponse;
 import org.springframework.core.ParameterizedTypeReference;
@@ -53,13 +54,27 @@ public abstract class AbstractApiClient implements ApiClient {
             }
         }
         return spec
-                .exchangeToMono(response -> response
-                        .bodyToMono(ParameterizedTypeReference.forType(
-                                ResolvableType
-                                        .forClassWithGenerics(ApiResponse.class,
-                                                              request.responseType())
-                                        .getType()
-                        )))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response
+                                .bodyToMono(ParameterizedTypeReference.forType(
+                                        ResolvableType
+                                                .forClassWithGenerics(ApiResponse.class,
+                                                                      request.responseType())
+                                                .getType()
+                                ));
+                    }
+                    return response
+                            .<ApiResponse>bodyToMono(ParameterizedTypeReference.forType(
+                                    ResolvableType
+                                            .forClassWithGenerics(ApiResponse.class, Object.class)
+                                            .getType()
+                            ))
+                            .flatMap(errBody -> Mono
+                                    .error(new BusinessException("接口请求失败,code:" + response
+                                            .statusCode()
+                                            .name() + " message:" + errBody.getMessage())));
+                })
                 ;
     }
 }
