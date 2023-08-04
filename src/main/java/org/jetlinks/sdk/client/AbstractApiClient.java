@@ -1,8 +1,8 @@
 package org.jetlinks.sdk.client;
 
-import org.hswebframework.web.exception.BusinessException;
 import org.jetlinks.sdk.model.ApiRequest;
 import org.jetlinks.sdk.model.ApiResponse;
+import org.jetlinks.sdk.model.ApiResponseErrorException;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.ResolvableType;
 import org.springframework.http.HttpMethod;
@@ -65,15 +65,12 @@ public abstract class AbstractApiClient implements ApiClient {
                                 ));
                     }
                     return response
-                            .<ApiResponse>bodyToMono(ParameterizedTypeReference.forType(
+                            .<ApiResponse<Object>>bodyToMono(ParameterizedTypeReference.forType(
                                     ResolvableType
                                             .forClassWithGenerics(ApiResponse.class, Object.class)
                                             .getType()
                             ))
-                            .flatMap(errBody -> Mono
-                                    .error(new BusinessException("接口请求失败,code:" + response
-                                            .statusCode()
-                                            .name() + " message:" + errBody.getMessage())));
+                            .flatMap(errBody -> Mono.error(() -> new ApiResponseErrorException(errBody)));
                 })
                 ;
     }
