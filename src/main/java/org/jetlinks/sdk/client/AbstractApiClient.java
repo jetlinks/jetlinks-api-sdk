@@ -2,6 +2,7 @@ package org.jetlinks.sdk.client;
 
 import org.jetlinks.sdk.model.ApiRequest;
 import org.jetlinks.sdk.model.ApiResponse;
+import org.jetlinks.sdk.model.ApiResponseErrorException;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.ResolvableType;
 import org.springframework.http.HttpMethod;
@@ -53,13 +54,24 @@ public abstract class AbstractApiClient implements ApiClient {
             }
         }
         return spec
-                .exchangeToMono(response -> response
-                        .bodyToMono(ParameterizedTypeReference.forType(
-                                ResolvableType
-                                        .forClassWithGenerics(ApiResponse.class,
-                                                              request.responseType())
-                                        .getType()
-                        )))
+                .exchangeToMono(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        return response
+                                .bodyToMono(ParameterizedTypeReference.forType(
+                                        ResolvableType
+                                                .forClassWithGenerics(ApiResponse.class,
+                                                                      request.responseType())
+                                                .getType()
+                                ));
+                    }
+                    return response
+                            .<ApiResponse<Object>>bodyToMono(ParameterizedTypeReference.forType(
+                                    ResolvableType
+                                            .forClassWithGenerics(ApiResponse.class, Object.class)
+                                            .getType()
+                            ))
+                            .flatMap(errBody -> Mono.error(() -> new ApiResponseErrorException(errBody)));
+                })
                 ;
     }
 }
