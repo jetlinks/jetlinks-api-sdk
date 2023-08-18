@@ -81,6 +81,14 @@ public class SimpleApiRequest<T> implements ApiRequest<T> {
             return method(HttpMethod.PATCH);
         }
 
+        public DefaultApiRequestBuilder<T> put() {
+            return method(HttpMethod.PUT);
+        }
+
+        public DefaultApiRequestBuilder<T> delete() {
+            return method(HttpMethod.DELETE);
+        }
+
         public DefaultApiRequestBuilder<T> method(HttpMethod method) {
             this.method = method;
             return this;
