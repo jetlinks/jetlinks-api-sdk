@@ -14,15 +14,20 @@ import java.util.Map;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public abstract class Extensible {
-    private final Map<String, Object> extensions = new LinkedHashMap<>();
+    private final Map<String, Object> additionalProperties = new LinkedHashMap<>();
 
     @JsonAnySetter
     public void extension(String name, Object value) {
-        extensions.put(name, value);
+        additionalProperties.put(name, value);
     }
 
-    @JsonAnyGetter
     public Map<String, Object> extensions() {
-        return extensions;
+        return additionalProperties;
+    }
+
+    /** 未建模字段展开到 JSON 顶层；与业务模型显式声明的 extensions 属性独立。 */
+    @JsonAnyGetter
+    public Map<String, Object> additionalProperties() {
+        return additionalProperties;
     }
 }

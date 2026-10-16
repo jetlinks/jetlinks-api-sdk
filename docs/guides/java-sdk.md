@@ -86,7 +86,7 @@ Mono<Boolean> accepted = receiver.receive(headers, originalBytes);
 
 两个通知通道使用同一套 Header/签名规则：应用 ID 来自验签后的 `X-Application-Id`，业务应用额外携带 `X-Platform-Id`。`subject` 是事件主体；`event.data` 是业务数据，都不能用于决定当前调用的是哪个应用。
 
-`VerifiedNotification.event` 是 `StructuredEvent<Map<String, Object>>`。处理已知事件时直接转换数据类型：
+`VerifiedNotification.event` 是 `StructuredEvent<Map<String, Object>>`。公开事件上下文通过 `event.extensions` 读取，例如 `tenantId`；业务数据仍在 `event.data`，应用身份来自验签后的 Header。处理已知事件时直接转换数据类型：
 
 ```java
 if (EventTypes.APPLICATION_CREDENTIAL_SYNCED.equals(notice.event.type)) {
@@ -256,3 +256,5 @@ jetlinks:
 自动提供两个客户端，可声明自己的 `TokenProvider` 或客户端 Bean 替换。仅在显式提供 `NotificationVerifier`、`NotificationStore` 时开放通知端点；仅在提供 `CommandService` 时开放命令端点。端点可配置 `notification-path`、`command-base-path`，默认 `/jetlinks/events`、`/api`。
 
 Starter 基于 Spring Boot 3.5 / Java 17，自动发现配置并适配 MVC 或 WebFlux；MVC 使用 `jakarta.servlet`。核心 SDK 可独立于 Spring 使用。
+
+验证：Java 17 全模块 `mvn verify`，50 项通过；包括公开事件扩展与未知字段的 JSON 往返。

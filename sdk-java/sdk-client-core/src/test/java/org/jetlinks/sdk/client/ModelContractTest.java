@@ -67,6 +67,7 @@ class ModelContractTest {
     void genericNotificationRetainsCustomDataAndOriginalBytes() {
         String raw =
                 "{ \"id\":\"evt\", \"type\":\"application.custom\", \"future\":42,"
+                        + "\"extensions\":{\"tenantId\":\"tenant-a\"},"
                         + "\"subject\":\"device-1\",\"data\":{\"application\":{\"id\":\"app\","
                         + "\"templateId\":\"template\"},\"sourceEventId\":\"source\","
                         + "\"payload\":{\"value\":[{\"id\":\"member\",\"region\":\"east\"}]}}}";
@@ -79,6 +80,11 @@ class ModelContractTest {
         assertEquals("member", data.payload.value.get(0).id);
         assertEquals("east", data.payload.value.get(0).extensions().get("region"));
         assertEquals(42, notice.event.extensions().get("future"));
+        assertEquals("tenant-a", notice.event.extensions.get("tenantId"));
+        assertFalse(notice.event.extensions().containsKey("extensions"));
+        var encoded = Json.parse(Json.bytes(notice.event));
+        assertEquals("tenant-a", encoded.path("extensions").path("tenantId").asText());
+        assertEquals(42, encoded.path("future").asInt());
         assertArrayEquals(raw.getBytes(StandardCharsets.UTF_8), notice.rawBody);
         // A future application.* event is delivered without being parsed as a lifecycle payload.
         ApplicationState state = ApplicationLifecycle.apply(null, notice, id -> null);
