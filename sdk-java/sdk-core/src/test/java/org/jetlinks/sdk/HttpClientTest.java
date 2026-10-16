@@ -28,7 +28,7 @@ class HttpClientTest {
                                                 .sendString(
                                                         Mono.just(
                                                                 "<html>upstream"
-                                                                    + " unavailable</html>")))
+                                                                        + " unavailable</html>")))
                         .bindNow();
         try (JetLinksReactiveClient client =
                 new JetLinksReactiveClient(
@@ -38,6 +38,8 @@ class HttpClientTest {
                             SdkException.class,
                             () -> client.request(ApiRequest.get("/failure")).block());
             assertEquals(502, failure.status);
+            assertEquals(SdkException.Code.REMOTE_ERROR, failure.code);
+            assertFalse(failure.getMessage().contains("upstream"));
             assertTrue(failure.response.isTextual());
             StepVerifier.create(client.stream(ApiRequest.get("/failure")))
                     .expectErrorMatches(
@@ -46,7 +48,7 @@ class HttpClientTest {
         } finally {
             server.disposeNow();
         }
-        assertThrows(IllegalArgumentException.class, () -> Json.parse(new byte[0]));
+        assertThrows(SdkException.class, () -> Json.parse(new byte[0]));
     }
 
     @Test
@@ -56,7 +58,7 @@ class HttpClientTest {
                 new CachedTokenProvider(
                         () ->
                                 attempts.incrementAndGet() == 1
-                                        ? Mono.error(new IllegalStateException("unavailable"))
+                                        ? Mono.error(() -> new IllegalStateException("unavailable"))
                                         : Mono.just(
                                                 new CachedTokenProvider.Issued(
                                                         "recovered",
@@ -199,7 +201,11 @@ class HttpClientTest {
                                                     new JetLinksClient(client)
                                                             .request(ApiRequest.get("/")))
                                     .subscribeOn(reactor.core.scheduler.Schedulers.parallel()))
-                    .expectError(IllegalStateException.class)
+                    .expectErrorMatches(
+                            error ->
+                                    error instanceof SdkException
+                                            && ((SdkException) error).code
+                                                    == SdkException.Code.INVALID_STATE)
                     .verify();
         }
     }
@@ -212,7 +218,7 @@ class HttpClientTest {
                         () ->
                                 calls.incrementAndGet() == 1
                                         ? Flux.just(1, 2)
-                                        : Flux.error(new IllegalStateException("offline")),
+                                        : Flux.error(() -> new IllegalStateException("offline")),
                         10);
         assertEquals(Arrays.asList(1, 2), sync.refresh().block());
         assertThrows(IllegalStateException.class, () -> sync.refresh().block());

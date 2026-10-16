@@ -3,6 +3,8 @@ package org.jetlinks.sdk.internal;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import org.jetlinks.sdk.Json;
+import org.jetlinks.sdk.SdkException;
+import org.jetlinks.sdk.SdkException.Code;
 
 import reactor.core.publisher.*;
 
@@ -10,8 +12,9 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Frames bytes before UTF-8 decoding, so multibyte characters split across network chunks remain
- * intact. @since 2.0
+ * 先按字节分行，再解码 UTF-8，避免跨网络分片的多字节字符损坏。
+ *
+ * @since 2.0
  */
 public final class Ndjson {
     private Ndjson() {}
@@ -40,7 +43,7 @@ public final class Ndjson {
                     emit(values);
                 } else {
                     if (line.size() >= limit)
-                        throw new IllegalArgumentException("NDJSON line exceeds limit");
+                        throw new SdkException(Code.LIMIT_EXCEEDED, "NDJSON line exceeds limit");
                     line.write(b);
                 }
             }

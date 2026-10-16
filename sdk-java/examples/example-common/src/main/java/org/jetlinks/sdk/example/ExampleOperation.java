@@ -1,6 +1,10 @@
 package org.jetlinks.sdk.example;
 
-/** Shared UI operation request; body is the user's arbitrary platform request payload. @since 2.0 */
+/**
+ * 共用前端的操作请求；body 是用户自定义的平台请求载荷。
+ *
+ * @since 2.0
+ */
 public class ExampleOperation {
     public String authMode = "oauth2", client = "", operation = "", entry = "";
     public String id = "", roleId = "", taskId = "";

@@ -2,7 +2,11 @@ package org.jetlinks.sdk.event;
 
 import java.util.List;
 
-/** Known lifecycle and synchronization payload fields; absent fields remain null. @since 2.0 */
+/**
+ * 已知生命周期及同步事件的载荷；未提供的字段保持 null。
+ *
+ * @since 2.0
+ */
 public class LifecyclePayload {
     public EncryptedCredential credential;
     public List<String> userIds;

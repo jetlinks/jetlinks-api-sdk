@@ -1,13 +1,16 @@
 package org.jetlinks.sdk;
 
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.model.*;
-import java.util.List;
 
 import reactor.core.publisher.*;
 
+import java.util.List;
+
 /**
- * Explicit business application queries. Permissions remain enforced by the platform; no local
- * permission engine. @since 2.0
+ * 业务应用事实查询入口；权限由平台执行，SDK 不缓存或推断本地权限。
+ *
+ * @since 2.0
  */
 public final class BusinessApplications {
     private final JetLinksReactiveClient client;
@@ -19,18 +22,20 @@ public final class BusinessApplications {
     }
 
     public Flux<Member> members() {
-        return client.pages("/user/detail/business_application/" + id + "/_query", new Query(), Member.class);
+        return client.pages(
+                "/user/detail/business_application/" + id + "/_query", new Query(), Member.class);
     }
 
     public Flux<Role> roles() {
-        return client.pages("/role/_query", new Query().eq("applicationId", decode(id)), Role.class);
+        return client.pages(
+                "/role/_query", new Query().eq("applicationId", decode(id)), Role.class);
     }
 
     private String decode(String v) {
         try {
             return java.net.URLDecoder.decode(v, "UTF-8");
         } catch (java.io.UnsupportedEncodingException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.INVALID_STATE, "Cannot encode UTF-8 value", e);
         }
     }
 
@@ -43,7 +48,8 @@ public final class BusinessApplications {
     }
 
     private <T> Flux<T> relation(String name, Class<T> type) {
-        return client.pages("/business-application/" + id + "/" + name + "/_query", new Query(), type);
+        return client.pages(
+                "/business-application/" + id + "/" + name + "/_query", new Query(), type);
     }
 
     public Flux<RoleAuthorization> roleAuthorization(String role) {
@@ -53,7 +59,8 @@ public final class BusinessApplications {
                         + "/roles/"
                         + ApiRequest.segment(role)
                         + "/authorization/_query",
-                new Query(), RoleAuthorization.class);
+                new Query(),
+                RoleAuthorization.class);
     }
 
     public Flux<RoleMenu> roleMenus(String role) {
@@ -63,7 +70,8 @@ public final class BusinessApplications {
                         + "/roles/"
                         + ApiRequest.segment(role)
                         + "/menus/_query",
-                new Query(), RoleMenu.class);
+                new Query(),
+                RoleMenu.class);
     }
 
     public Mono<List<AssetAccesses>> assets(String role) {
@@ -74,6 +82,7 @@ public final class BusinessApplications {
 
     public Mono<Void> syncCredential() {
         return client.request(
-                ApiRequest.post("/business-application/" + id + "/credential/_sync", null)).then();
+                        ApiRequest.post("/business-application/" + id + "/credential/_sync", null))
+                .then();
     }
 }

@@ -69,13 +69,15 @@ class ProtocolTest {
     void tamperAndDuplicateHeadersFail() {
         Map<String, List<String>> h = headers();
         h.put("x-application-id", Collections.singletonList("other"));
-        assertThrows(SecurityException.class, () -> verifier().verify(h, body()).block());
+        assertEquals(
+                SdkException.Code.AUTHENTICATION,
+                assertThrows(SdkException.class, () -> verifier().verify(h, body()).block()).code);
         assertThrows(
-                SecurityException.class,
+                SdkException.class,
                 () -> verifier().verify(headers(), "{}".getBytes(StandardCharsets.UTF_8)).block());
         Map<String, List<String>> platform = headers();
         platform.put("X-Platform-Id", Collections.singletonList("region"));
-        assertThrows(SecurityException.class, () -> verifier().verify(platform, body()).block());
+        assertThrows(SdkException.class, () -> verifier().verify(platform, body()).block());
     }
 
     @Test

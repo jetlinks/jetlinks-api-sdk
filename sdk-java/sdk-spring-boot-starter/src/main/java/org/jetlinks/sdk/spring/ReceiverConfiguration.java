@@ -13,8 +13,9 @@ import org.springframework.web.reactive.function.server.*;
 import reactor.core.publisher.*;
 
 /**
- * Conditional protocol endpoints. Explicit verifier/store or command service beans are required;
- * existing Web stack is retained. @since 2.0
+ * 按当前 Web 技术栈配置协议端点；需要显式提供通知验签/存储或命令服务 Bean。
+ *
+ * @since 2.0
  */
 @Configuration(proxyBeanMethods = false)
 public class ReceiverConfiguration {
@@ -48,12 +49,8 @@ public class ReceiverConfiguration {
                                     .onErrorResume(
                                             e ->
                                                     ServerResponse.status(
-                                                                    e instanceof SecurityException
-                                                                                    || e
-                                                                                            instanceof
-                                                                                            IllegalArgumentException
-                                                                            ? 401
-                                                                            : 503)
+                                                                    EndpointErrors
+                                                                            .notificationStatus(e))
                                                             .build()));
         }
 
@@ -90,9 +87,7 @@ public class ReceiverConfiguration {
                                     .onErrorResume(
                                             e ->
                                                     ServerResponse.status(
-                                                                    e instanceof SecurityException
-                                                                            ? 401
-                                                                            : 500)
+                                                                    EndpointErrors.commandStatus(e))
                                                             .build()));
         }
 

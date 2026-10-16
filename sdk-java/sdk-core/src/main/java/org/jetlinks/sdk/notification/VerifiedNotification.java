@@ -5,8 +5,9 @@ import org.jetlinks.sdk.TypeRef;
 import org.jetlinks.sdk.event.StructuredEvent;
 
 /**
- * Trusted routing identity plus immutable original HTTP bytes. Event subject/data do not select
- * identity. @since 2.0
+ * 验签后的路由身份与收到的原始字节；event.subject/data 不用于选择接收方。
+ *
+ * @since 2.0
  */
 public final class VerifiedNotification {
     public final String platformId, applicationId, eventId;
@@ -39,7 +40,7 @@ public final class VerifiedNotification {
                 });
     }
 
-    /** Decode known or custom data without using payload fields to select the recipient. */
+    /** 转换已知或自定义载荷类型；接收方身份始终使用验签 Header。 */
     public <T> T data(Class<T> type) {
         return Json.convert(event.data, type);
     }

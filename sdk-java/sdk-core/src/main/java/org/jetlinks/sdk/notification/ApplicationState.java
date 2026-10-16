@@ -1,8 +1,9 @@
 package org.jetlinks.sdk.notification;
 
 /**
- * Persisted third-party instance state, including lifecycle boundaries. Secrets must stay
- * server-side. @since 2.0
+ * 持久化的第三方应用实例状态，含生命周期边界；密钥只能保存在服务端。
+ *
+ * @since 2.0
  */
 public final class ApplicationState {
     public String platformId = "", applicationId, templateId, apiBaseUrl, accessKey, accessSecret;

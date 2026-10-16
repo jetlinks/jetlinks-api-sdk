@@ -6,8 +6,9 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Single-client defaults. Multi-application credentials should be supplied through the core
- * resolver/store SPI. @since 2.0
+ * 单客户端默认配置；多应用凭据通过核心 resolver/store SPI 提供。
+ *
+ * @since 2.0
  */
 @ConfigurationProperties("jetlinks.sdk")
 public class JetLinksProperties {

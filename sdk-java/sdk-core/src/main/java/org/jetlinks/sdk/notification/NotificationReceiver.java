@@ -5,8 +5,9 @@ import reactor.core.publisher.Mono;
 import java.util.*;
 
 /**
- * Composes verification with durable acceptance. HTTP adapters must ACK only after successful
- * completion. @since 2.0
+ * 组合验签和可靠受理；HTTP 适配器仅在持久化成功后返回成功响应。
+ *
+ * @since 2.0
  */
 public final class NotificationReceiver {
     private final NotificationVerifier verifier;

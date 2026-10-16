@@ -1,5 +1,7 @@
 package org.jetlinks.sdk.auth;
 
+import org.jetlinks.sdk.SdkException;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.crypto.Signatures;
 
 import java.io.*;
@@ -9,15 +11,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
- * Binary application self-signed machine Token; null scopes preserves platform default, empty means
- * zero scope. @since 2.0
+ * 应用本地签名的二进制机器 Token；scopes 为 null 使用平台默认权限，空集合表示无权限。
+ *
+ * @since 2.0
  */
 public final class LocalToken {
     private LocalToken() {}
 
     public static String create(String key, String secret, List<String> scopes, long issuedAt) {
         if (key == null || key.isEmpty() || secret == null || secret.isEmpty() || issuedAt < 0)
-            throw new IllegalArgumentException("Invalid credential");
+            throw new SdkException(Code.INVALID_ARGUMENT, "Invalid credential");
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
@@ -35,10 +38,11 @@ public final class LocalToken {
             if (scopes != null)
                 for (String scope : scopes) {
                     if (scope == null || scope.trim().isEmpty())
-                        throw new IllegalArgumentException("Invalid scope");
+                        throw new SdkException(Code.INVALID_ARGUMENT, "Invalid scope");
                     sorted.add(scope.trim());
                 }
-            if (sorted.size() > 65535) throw new IllegalArgumentException("Too many scopes");
+            if (sorted.size() > 65535)
+                throw new SdkException(Code.LIMIT_EXCEEDED, "Too many scopes");
             out.writeShort(sorted.size());
             for (String s : sorted) string(out, s);
             string(out, "");
@@ -52,16 +56,16 @@ public final class LocalToken {
             out.write(signature, 0, 16);
             String result = "at_" + base62(bytes.toByteArray());
             if (result.length() > 4096)
-                throw new IllegalArgumentException("Token exceeds size limit");
+                throw new SdkException(Code.LIMIT_EXCEEDED, "Token exceeds size limit");
             return result;
         } catch (IOException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot compute credential signature", e);
         }
     }
 
     private static void string(DataOutputStream out, String value) throws IOException {
         byte[] b = value.getBytes(StandardCharsets.UTF_8);
-        if (b.length > 1024) throw new IllegalArgumentException("Token field too long");
+        if (b.length > 1024) throw new SdkException(Code.LIMIT_EXCEEDED, "Token field too long");
         out.writeShort(b.length);
         out.write(b);
     }

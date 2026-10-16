@@ -3,17 +3,19 @@ package org.jetlinks.sdk;
 import reactor.core.publisher.Mono;
 
 /**
- * Authentication source bound to one server/application/purpose/scope. Never reused for another
- * identity. @since 2.0
+ * 绑定单一服务地址、应用、用途和 Scope 的认证来源，不应跨身份复用。
+ *
+ * @since 2.0
  */
 public interface TokenProvider {
     /**
-     * Called on subscription. Empty means anonymous; errors abort the request. Implementations must
-     * not block.
+     * 订阅时获取 Token。返回空值表示匿名，失败中止请求；实现必须非阻塞。
+     *
+     * @since 2.0
      */
     Mono<String> token();
 
-    /** Invalidates cached credentials; must not replay business requests. */
+    /** 使缓存凭据失效，不重放业务请求。 */
     default void invalidate() {}
 
     static TokenProvider bearer(String token) {

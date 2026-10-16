@@ -459,3 +459,15 @@ OAuth2 机器/授权码响应一并使用 Token DTO。示例中的通用 HTTP �
 Java 8 启动纯 Java、Spring Boot 两个可执行服务，通过独立 Node 模拟平台的 22 个端到端场景，包含两类应用、多区域、签名通知、登录、订阅、分页、命令、取消及重启恢复。核心依赖检查、Node 语法、文档链接、空白及 `git diff --check` 通过。共享前端源码未变，复用已有 typecheck/lint/build 证据；真实平台环境仍未联调。
 
 日志：`/tmp/jetlinks-sdk-model-java8.log`、`/tmp/jetlinks-sdk-model-java17.log`、`/tmp/jetlinks-sdk-model-e2e.log`、`/tmp/jetlinks-sdk-model-dependencies.log`。实现已提交至 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15) 供评审；交付时仅回填本文件，不重复执行已覆盖当前实现的验证，Maven 包尚未发布。
+
+### 异常、中文注释与格式整理
+
+按用户要求统一 SDK 自身产生的失败为 `SdkException`，通过 `Code` 区分参数、状态、鉴权、编解码、加密、容量、远端及传输错误；保留远端状态/响应和原始 cause。用户处理器或存储扩展产生的异常仍保留原样，便于诊断。调整直接创建的 Mono/Flux 错误为 Supplier 延迟创建，并同步 Starter/Example 的错误映射，保持鉴权、容量及重试语义。
+
+范围为 Java 核心、Starter、示例与对应测试；补齐公共 API、SPI 和并发/签名/生命周期边界的中文注释，统一 Java 格式。不增加异常继承树、平台依赖、业务能力或前端改动。阶段完成后集中执行异常分类/原因保留/惰性错误和 HTTP 映射回归、Java 8/17 测试及两个真实示例的本地模拟平台验收。
+
+实施结果：`SdkException.Code` 统一 SDK 自身错误，HTTP 传输和同步超时一并归类；JSON、加密及远端错误保留原因或响应，调用方扩展异常保留原样。Mono/Flux 直接创建的错误改为 Supplier；Starter 两种 Web 端点共用 `EndpointErrors`，鉴权拒绝为 401、正文超限为 413，通知持久化故障为可重试的 503。公共类、SPI 方法及签名、缓存代数、并发预算和乱序生命周期补齐中文注释，Java 使用四空格 AOSP 格式，8 个 POM 仅整理格式。
+
+2026-10-16 验证：最终实现的实际 Zulu Java 8 `mvn clean verify`、Temurin Java 17 `mvn clean test` 各 49 项通过，0 失败/错误/跳过；两个 Java 8 可执行服务通过独立 Node 模拟平台的 22 个端到端场景。新增 6 项测试并扩展原用例，覆盖分类/原始原因、双客户端超时/传输错误、扩展异常保留及 MVC/WebFlux 错误映射。Java 格式、POM 前后语义一致、响应式错误 Supplier、中文类注释、依赖边界、文档链接和空白检查全部通过。前端源码及构建配置未变，复用此前前端验证；未连接真实平台。
+
+日志：`/tmp/jetlinks-sdk-exceptions-java8.log`、`/tmp/jetlinks-sdk-exceptions-java17.log`、`/tmp/jetlinks-sdk-exceptions-e2e.log`、`/tmp/jetlinks-sdk-exceptions-dependencies.log`。沿用 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15) 交付。

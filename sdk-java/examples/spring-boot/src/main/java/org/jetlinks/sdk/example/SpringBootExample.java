@@ -10,8 +10,9 @@ import org.springframework.web.server.*;
 import java.util.*;
 
 /**
- * Spring Boot WebFlux launcher. Only the HTTP adapter differs from the standalone example. @since
- * 2.0
+ * Spring Boot WebFlux 启动入口，与独立 Java 示例共用业务实现。
+ *
+ * @since 2.0
  */
 @SpringBootApplication
 public class SpringBootExample {

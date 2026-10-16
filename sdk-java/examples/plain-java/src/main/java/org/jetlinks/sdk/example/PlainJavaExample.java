@@ -10,8 +10,9 @@ import reactor.netty.http.server.HttpServer;
 import java.util.*;
 
 /**
- * Standalone real HTTP service. Run from repository root; serves the same UI as every other
- * language adapter. @since 2.0
+ * 独立 HTTP 示例服务，从仓库根目录启动；所有语言适配器共用同一前端。
+ *
+ * @since 2.0
  */
 public final class PlainJavaExample {
     public static void main(String[] args) throws Exception {

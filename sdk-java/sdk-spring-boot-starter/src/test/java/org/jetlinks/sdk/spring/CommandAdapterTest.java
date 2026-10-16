@@ -104,6 +104,18 @@ class CommandAdapterTest {
                                     .jsonPath("$.applicationId")
                                     .isEqualTo("app");
                             assertEquals(0, context.getBean(CommandService.class).inFlight());
+                            client.post()
+                                    .uri(TARGET)
+                                    .bodyValue("{}")
+                                    .exchange()
+                                    .expectStatus()
+                                    .isUnauthorized();
+                            client.post()
+                                    .uri(TARGET)
+                                    .bodyValue(new byte[1024 * 1024 + 1])
+                                    .exchange()
+                                    .expectStatus()
+                                    .isEqualTo(413);
                         });
         new WebApplicationContextRunner()
                 .withUserConfiguration(Commands.class, JetLinksAutoConfiguration.class)
@@ -128,6 +140,8 @@ class CommandAdapterTest {
                                     .andExpect(jsonPath("$.applicationId").value("app"));
                             client.perform(post(TARGET).content(new byte[1024 * 1024 + 1]))
                                     .andExpect(status().isPayloadTooLarge());
+                            client.perform(post(TARGET).content("{}"))
+                                    .andExpect(status().isUnauthorized());
                             assertEquals(0, context.getBean(CommandService.class).inFlight());
                         });
     }

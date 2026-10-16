@@ -24,11 +24,14 @@ class SnapshotSynchronizerTest {
     @Test
     void reusedPublisherJoinsCurrentRefreshInsteadOfStartingAnotherLoad() {
         List<Sinks.One<Integer>> loads = new ArrayList<>();
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(() -> {
-            Sinks.One<Integer> source = Sinks.one();
-            loads.add(source);
-            return source.asMono().flux();
-        }, 10);
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () -> {
+                            Sinks.One<Integer> source = Sinks.one();
+                            loads.add(source);
+                            return source.asMono().flux();
+                        },
+                        10);
         Mono<List<Integer>> reused = sync.refresh();
         Disposable first = reused.subscribe();
         loads.get(0).tryEmitValue(1);
@@ -51,20 +54,28 @@ class SnapshotSynchronizerTest {
     @Test
     void subscriberSelectedBeforeCompletionCannotRestartAnOldTask() {
         List<Sinks.One<Integer>> loads = new ArrayList<>();
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(() -> {
-            Sinks.One<Integer> source = Sinks.one();
-            loads.add(source);
-            return source.asMono().flux();
-        }, 10);
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () -> {
+                            Sinks.One<Integer> source = Sinks.one();
+                            loads.add(source);
+                            return source.asMono().flux();
+                        },
+                        10);
         List<Disposable> subscriptions = new ArrayList<>();
         List<List<Integer>> delayedResults = new ArrayList<>();
         try {
-            subscriptions.add(sync.refresh().doOnSubscribe(ignored -> {
-                // Complete the task after this subscriber selects it but before cache subscribes it.
-                subscriptions.add(sync.refresh().subscribe());
-                loads.get(0).tryEmitValue(1);
-                subscriptions.add(sync.refresh().subscribe());
-            }).subscribe(delayedResults::add));
+            subscriptions.add(
+                    sync.refresh()
+                            .doOnSubscribe(
+                                    ignored -> {
+                                        // Complete the task after this subscriber selects it but
+                                        // before cache subscribes it.
+                                        subscriptions.add(sync.refresh().subscribe());
+                                        loads.get(0).tryEmitValue(1);
+                                        subscriptions.add(sync.refresh().subscribe());
+                                    })
+                            .subscribe(delayedResults::add));
             assertEquals(2, loads.size(), "The completed task cannot execute again");
             assertEquals(Arrays.asList(Arrays.asList(1)), delayedResults);
             loads.get(1).tryEmitValue(2);
@@ -78,8 +89,13 @@ class SnapshotSynchronizerTest {
     void successfulRefreshMayTriggerAnotherRefreshFromItsSubscriber() {
         Sinks.One<Integer> secondLoad = Sinks.one();
         AtomicInteger loads = new AtomicInteger();
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(
-                () -> loads.incrementAndGet() == 1 ? Flux.just(1) : secondLoad.asMono().flux(), 10);
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () ->
+                                loads.incrementAndGet() == 1
+                                        ? Flux.just(1)
+                                        : secondLoad.asMono().flux(),
+                        10);
         Disposable chained = sync.refresh().flatMap(previous -> sync.refresh()).subscribe();
         Disposable joined = sync.refresh().subscribe();
         try {
@@ -96,10 +112,13 @@ class SnapshotSynchronizerTest {
     void cancelledCallerDoesNotCancelTheSharedRefresh() {
         Sinks.One<Integer> source = Sinks.one();
         AtomicInteger loads = new AtomicInteger();
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(() -> {
-            loads.incrementAndGet();
-            return source.asMono().flux();
-        }, 10);
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () -> {
+                            loads.incrementAndGet();
+                            return source.asMono().flux();
+                        },
+                        10);
         Disposable cancelled = sync.refresh().subscribe();
         cancelled.dispose();
         StepVerifier.create(sync.refresh())
@@ -113,16 +132,35 @@ class SnapshotSynchronizerTest {
     void failedRefreshCoolsDownThenRetriesWithoutReplacingTheGoodSnapshot() {
         AtomicInteger loads = new AtomicInteger();
         AtomicLong now = new AtomicLong(1000);
-        Clock clock = new Clock() {
-            @Override public ZoneId getZone() { return ZoneOffset.UTC; }
-            @Override public Clock withZone(ZoneId zone) { return this; }
-            @Override public Instant instant() { return Instant.ofEpochMilli(now.get()); }
-        };
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(() -> {
-            int attempt = loads.incrementAndGet();
-            return attempt == 1 ? Flux.just(1) : attempt == 2
-                    ? Flux.error(new IllegalStateException("offline")) : Flux.just(3);
-        }, 10, clock);
+        Clock clock =
+                new Clock() {
+                    @Override
+                    public ZoneId getZone() {
+                        return ZoneOffset.UTC;
+                    }
+
+                    @Override
+                    public Clock withZone(ZoneId zone) {
+                        return this;
+                    }
+
+                    @Override
+                    public Instant instant() {
+                        return Instant.ofEpochMilli(now.get());
+                    }
+                };
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () -> {
+                            int attempt = loads.incrementAndGet();
+                            return attempt == 1
+                                    ? Flux.just(1)
+                                    : attempt == 2
+                                            ? Flux.error(() -> new IllegalStateException("offline"))
+                                            : Flux.just(3);
+                        },
+                        10,
+                        clock);
         assertEquals(Arrays.asList(1), sync.refresh().block());
         StepVerifier.create(sync.refresh()).expectError(IllegalStateException.class).verify();
         StepVerifier.create(sync.refresh()).expectError(IllegalStateException.class).verify();
@@ -136,10 +174,17 @@ class SnapshotSynchronizerTest {
     @Test
     void oversizedRefreshRetainsThePreviousSnapshot() {
         AtomicInteger loads = new AtomicInteger();
-        SnapshotSynchronizer<Integer> sync = new SnapshotSynchronizer<>(
-                () -> loads.incrementAndGet() == 1 ? Flux.just(1) : Flux.range(1, 3), 2);
+        SnapshotSynchronizer<Integer> sync =
+                new SnapshotSynchronizer<>(
+                        () -> loads.incrementAndGet() == 1 ? Flux.just(1) : Flux.range(1, 3), 2);
         assertEquals(Arrays.asList(1), sync.refresh().block());
-        StepVerifier.create(sync.refresh()).expectError(IllegalStateException.class).verify();
+        StepVerifier.create(sync.refresh())
+                .expectErrorMatches(
+                        error ->
+                                error instanceof SdkException
+                                        && ((SdkException) error).code
+                                                == SdkException.Code.LIMIT_EXCEEDED)
+                .verify();
         assertEquals(Arrays.asList(1), sync.current());
     }
 }

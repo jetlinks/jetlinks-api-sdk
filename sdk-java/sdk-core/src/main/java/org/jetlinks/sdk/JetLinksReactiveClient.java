@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.codec.http.HttpMethod;
 
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.internal.*;
 import org.jetlinks.sdk.model.Page;
 
@@ -17,11 +18,13 @@ import reactor.netty.resources.ConnectionProvider;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Nonblocking client bound to one trusted origin/authentication context. Owns its connection pool
- * unless injected. @since 2.0
+ * 绑定单一可信地址和认证上下文的非阻塞客户端；默认管理自己的连接池，外部注入的连接池由调用方关闭。
+ *
+ * @since 2.0
  */
 public final class JetLinksReactiveClient implements AutoCloseable {
     private final String base;
@@ -59,7 +62,7 @@ public final class JetLinksReactiveClient implements AutoCloseable {
     }
 
     private HttpClient.RequestSender sender(ApiRequest request, String token) {
-        if (closed.get()) throw new IllegalStateException("Client closed");
+        if (closed.get()) throw new SdkException(Code.INVALID_STATE, "Client closed");
         return http.headers(
                         h -> {
                             h.set("Accept", "application/json");
@@ -71,11 +74,31 @@ public final class JetLinksReactiveClient implements AutoCloseable {
                 .uri(request.target(base));
     }
 
+    /** 发送单次请求，保留原始状态和正文；Token 及网络操作在订阅时执行。 */
     public Mono<HttpResult> exchange(ApiRequest request) {
         return Mono.defer(auth::token)
                 .defaultIfEmpty("")
-                .flatMap(token -> send(request, token).response(this::collectResponse).single())
-                .timeout(timeout);
+                .flatMap(token -> exchangeResponse(request, token))
+                .timeout(timeout, Mono.error(JetLinksReactiveClient::requestTimeout));
+    }
+
+    private Mono<HttpResult> exchangeResponse(ApiRequest request, String token) {
+        return Mono.defer(() -> send(request, token).response(this::collectResponse).single())
+                .onErrorMap(JetLinksReactiveClient::transportFailure);
+    }
+
+    // 仅在 HTTP 边界包装传输错误，认证扩展在边界外执行，保留其原始异常。
+    private static Throwable transportFailure(Throwable error) {
+        return error instanceof SdkException
+                ? error
+                : new SdkException(Code.TRANSPORT, "HTTP transport failed", error);
+    }
+
+    private static SdkException requestTimeout() {
+        return new SdkException(
+                Code.TRANSPORT,
+                "HTTP request timed out",
+                new TimeoutException("HTTP request deadline exceeded"));
     }
 
     private HttpClient.ResponseReceiver<?> send(ApiRequest request, String token) {
@@ -85,8 +108,9 @@ public final class JetLinksReactiveClient implements AutoCloseable {
 
     private Mono<HttpResult> collectResponse(HttpClientResponse response, ByteBufFlux body) {
         Map<String, List<String>> headers = new LinkedHashMap<>();
-        response.responseHeaders().names().forEach(
-                name -> headers.put(name, response.responseHeaders().getAll(name)));
+        response.responseHeaders()
+                .names()
+                .forEach(name -> headers.put(name, response.responseHeaders().getAll(name)));
         int status = response.status().code();
         return BoundedBytes.collect(body.asByteArray(), maxBytes)
                 .map(bytes -> new HttpResult(status, headers, bytes));
@@ -96,6 +120,7 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         return exchange(request).map(r -> r.value(request.unwrap));
     }
 
+    /** 按指定泛型解码结果；JSON null 对应空 Mono。 */
     public <T> Mono<T> request(ApiRequest request, TypeRef<T> type) {
         return request(request).mapNotNull(n -> Json.convert(n, type));
     }
@@ -112,27 +137,32 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         return stream(request, TypeRef.of(type));
     }
 
+    /** 按 NDJSON 逐条返回，取消订阅会中止 HTTP 响应读取。 */
     public Flux<JsonNode> stream(ApiRequest request) {
         return Mono.defer(auth::token)
                 .defaultIfEmpty("")
-                .flatMapMany(token -> send(request, token).response(this::decodeStream))
-                .timeout(timeout);
+                .flatMapMany(token -> streamResponse(request, token))
+                .timeout(timeout, Flux.error(JetLinksReactiveClient::requestTimeout));
+    }
+
+    private Flux<JsonNode> streamResponse(ApiRequest request, String token) {
+        return Flux.defer(() -> send(request, token).response(this::decodeStream))
+                .onErrorMap(JetLinksReactiveClient::transportFailure);
     }
 
     private Flux<JsonNode> decodeStream(HttpClientResponse response, ByteBufFlux body) {
         if (response.status().code() >= 400) {
             return collectResponse(response, body)
-                    .flatMapMany(result -> Flux.error(new SdkException(result.status, result.json())));
+                    .flatMapMany(
+                            result ->
+                                    Flux.error(
+                                            () -> new SdkException(result.status, result.json())));
         }
-        // Frame without aggregating the stream; both the per-line bound and cancellation remain
-        // owned by the decoder and the HTTP subscription.
+        // 逐行解码，不聚合整个流；解码器限制单行大小，取消信号继续传递给 HTTP 订阅。
         return Ndjson.decode(body.asByteArray(), maxBytes);
     }
 
-    /**
-     * Fetches pages on demand. Each query result must be bounded by pageSize; no whole-dataset
-     * collection.
-     */
+    /** 按需逐页读取，每页受 pageSize 限制，不聚合整个数据集。 */
     public Flux<JsonNode> pages(String path, Query query) {
         return pages(path, query, JsonNode.class);
     }
@@ -141,6 +171,7 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         return pages(path, query, TypeRef.of(type));
     }
 
+    /** 按需读取后续页，并逐条转换类型；调用期间不要修改 query。 */
     public <T> Flux<T> pages(String path, Query query, TypeRef<T> type) {
         return Flux.defer(() -> page(path, query, query.pageIndex))
                 .expand(result -> nextPage(path, query, result), 1)
@@ -170,10 +201,12 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         return base;
     }
 
+    /** 使当前认证缓存失效，下一次请求重新获取 Token。 */
     public void invalidate() {
         auth.invalidate();
     }
 
+    /** 关闭客户端并使认证缓存失效；仅释放由此客户端创建的连接池。 */
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {

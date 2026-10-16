@@ -1,8 +1,9 @@
 package org.jetlinks.sdk.notification;
 
 /**
- * Locally trusted ownership and secret; never construct this object from the incoming event. @since
- * 2.0
+ * 本地信任的密钥及其归属，不得根据收到的事件内容构造信任关系。
+ *
+ * @since 2.0
  */
 public final class TrustedKey {
     public static final String API = "api";
@@ -28,10 +29,7 @@ public final class TrustedKey {
         return api(app, secret, app);
     }
 
-    /**
-     * Local channel ID separates identical API app IDs from different configured platform
-     * addresses. Not a signature header.
-     */
+    /** 本地通道 ID 用于隔离不同平台地址上同名的 API 应用，不属于签名 Header。 */
     public static TrustedKey api(String app, String secret, String channel) {
         return new TrustedKey(API, "", app, null, secret, channel);
     }

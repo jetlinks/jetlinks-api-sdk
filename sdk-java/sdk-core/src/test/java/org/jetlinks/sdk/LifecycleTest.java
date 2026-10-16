@@ -122,17 +122,25 @@ class LifecycleTest {
 
     @Test
     void recreatedBeforeOldDeletionUsesNewCredentialsAndRejectsOldEvents() {
-        ApplicationState state = ApplicationLifecycle.apply(null,
-                notice("application.created", 100, 3, "https://p/old"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.created", 400, 1, "https://p/recreated"), k -> pem);
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null, notice("application.created", 100, 3, "https://p/old"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.created", 400, 1, "https://p/recreated"),
+                        k -> pem);
         assertEquals(400, state.createdAt);
         assertEquals(1, state.keyRevision);
         assertEquals("access-1", state.accessKey);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.deleted", 300, 0, "https://p/old"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.credential.rotated", 250, 4, "https://p/old"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state, notice("application.deleted", 300, 0, "https://p/old"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.credential.rotated", 250, 4, "https://p/old"),
+                        k -> pem);
         assertTrue(state.active());
         assertEquals(1, state.keyRevision);
         assertEquals("https://p/recreated", state.apiBaseUrl);
@@ -140,14 +148,22 @@ class LifecycleTest {
 
     @Test
     void repeatedCreatedDoesNotResetNewerCredentialsOrState() {
-        ApplicationState state = ApplicationLifecycle.apply(null,
-                notice("application.created", 100, 1, "https://p/initial"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.credential.rotated", 200, 2, "https://p/new"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.disabled", 300, 0, "https://p/new"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.created", 100, 1, "https://p/initial"), k -> pem);
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null, notice("application.created", 100, 1, "https://p/initial"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.credential.rotated", 200, 2, "https://p/new"),
+                        k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state, notice("application.disabled", 300, 0, "https://p/new"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.created", 100, 1, "https://p/initial"),
+                        k -> pem);
         assertEquals(100, state.createdAt);
         assertEquals(2, state.keyRevision);
         assertEquals("https://p/new", state.apiBaseUrl);
@@ -156,10 +172,16 @@ class LifecycleTest {
 
     @Test
     void lateInitialCreationPreservesStateRecoveredByCredentialSync() {
-        ApplicationState state = ApplicationLifecycle.apply(null,
-                notice("application.credential.synced", 200, 3, "https://p/current"), k -> pem);
-        state = ApplicationLifecycle.apply(state,
-                notice("application.created", 100, 1, "https://p/initial"), k -> pem);
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null,
+                        notice("application.credential.synced", 200, 3, "https://p/current"),
+                        k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.created", 100, 1, "https://p/initial"),
+                        k -> pem);
         assertEquals(100, state.createdAt);
         assertEquals(3, state.keyRevision);
         assertEquals("https://p/current", state.apiBaseUrl);

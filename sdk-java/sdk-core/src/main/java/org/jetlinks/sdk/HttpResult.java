@@ -2,11 +2,14 @@ package org.jetlinks.sdk;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import org.jetlinks.sdk.SdkException.Code;
+
 import java.util.*;
 
 /**
- * Bounded raw HTTP result. Header values remain multi-valued for diagnostic/protocol use. @since
- * 2.0
+ * 大小受限的原始 HTTP 响应；Header 保留多值，供诊断和协议校验。
+ *
+ * @since 2.0
  */
 public final class HttpResult {
     public final int status;
@@ -23,8 +26,8 @@ public final class HttpResult {
         if (body.length == 0) return Json.MAPPER.nullNode();
         try {
             return Json.parse(body);
-        } catch (IllegalArgumentException error) {
-            // Gateways may return HTML/text failures; retain the HTTP status for callers.
+        } catch (SdkException error) {
+            // 网关可能返回 HTML 或文本错误，此时保留 HTTP 状态供调用方判断。
             if (status >= 400)
                 return Json.MAPPER
                         .getNodeFactory()
@@ -39,7 +42,7 @@ public final class HttpResult {
         if (status >= 400 || code >= 400) throw new SdkException(status >= 400 ? status : code, n);
         if (unwrap) {
             if (!n.has("result"))
-                throw new IllegalStateException("Missing platform result envelope");
+                throw new SdkException(Code.SERIALIZATION, "Missing platform result envelope");
             return n.get("result");
         }
         return n;

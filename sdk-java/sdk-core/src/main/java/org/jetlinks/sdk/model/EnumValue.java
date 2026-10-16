@@ -1,9 +1,14 @@
 package org.jetlinks.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.Map;
 
-/** Platform enum value, accepting either its scalar ID or the value/text representation. @since 2.0 */
+/**
+ * 平台枚举值，同时接受标量 ID 和 value/text 对象。
+ *
+ * @since 2.0
+ */
 public class EnumValue {
     public String value, text;
 

@@ -1,6 +1,10 @@
 package org.jetlinks.sdk.model;
 
-/** Platform business-application login entry response. @since 2.0 */
+/**
+ * 平台业务应用登录入口的跳转响应。
+ *
+ * @since 2.0
+ */
 public class ApplicationRedirect {
     public String location;
 }

@@ -1,11 +1,14 @@
 package org.jetlinks.sdk;
 
+import org.jetlinks.sdk.SdkException.Code;
+
 import java.net.*;
 import java.util.*;
 
 /**
- * Per-call request. Mutable builder; do not modify after submitting. Relative paths cannot replace
- * the trusted origin. @since 2.0
+ * 单次调用的可变请求构造器，提交后不可继续修改；相对路径不能替换客户端绑定的可信地址。
+ *
+ * @since 2.0
  */
 public final class ApiRequest {
     public final String method, path;
@@ -19,10 +22,10 @@ public final class ApiRequest {
                 || path.contains("?")
                 || path.contains("#")
                 || path.contains("\\"))
-            throw new IllegalArgumentException("Expected relative API path");
+            throw new SdkException(Code.INVALID_ARGUMENT, "Expected relative API path");
         for (String part : path.split("/"))
             if (part.equals("..") || part.equals("."))
-                throw new IllegalArgumentException("Path traversal");
+                throw new SdkException(Code.INVALID_ARGUMENT, "Path traversal");
         this.method = method.toUpperCase(Locale.ROOT);
         this.path = path;
     }
@@ -54,11 +57,13 @@ public final class ApiRequest {
         return this;
     }
 
+    /** 关闭平台 result 解包，适用于 OAuth2 等原生响应。 */
     public ApiRequest raw() {
         unwrap = false;
         return this;
     }
 
+    /** 编码单个动态路径段，避免业务 ID 改变 URL 结构。 */
     public static String segment(String value) {
         return encode(value);
     }
@@ -67,19 +72,24 @@ public final class ApiRequest {
         try {
             return URLEncoder.encode(value, "UTF-8").replace("+", "%20");
         } catch (java.io.UnsupportedEncodingException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.INVALID_STATE, "Cannot encode UTF-8 value", e);
         }
     }
 
     public String target(String base) {
-        URI uri = URI.create(base);
+        URI uri;
+        try {
+            uri = URI.create(base);
+        } catch (IllegalArgumentException error) {
+            throw new SdkException(Code.INVALID_ARGUMENT, "Invalid API base URL", error);
+        }
         if (!uri.isAbsolute()
                 || uri.getHost() == null
                 || uri.getUserInfo() != null
                 || uri.getQuery() != null
                 || uri.getFragment() != null
                 || !Arrays.asList("http", "https").contains(uri.getScheme()))
-            throw new IllegalArgumentException("Invalid API base URL");
+            throw new SdkException(Code.INVALID_ARGUMENT, "Invalid API base URL");
         StringBuilder out = new StringBuilder(base.replaceAll("/+$", "")).append(path);
         query.forEach(
                 (k, v) ->

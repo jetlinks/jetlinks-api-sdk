@@ -2,7 +2,11 @@ package org.jetlinks.sdk.model;
 
 import java.util.Set;
 
-/** API group grant facts, including operation and asset scope. @since 2.0 */
+/**
+ * API 分组授权事实，包含操作及资产范围。
+ *
+ * @since 2.0
+ */
 public class ApiGrant extends Extensible {
     public String id, targetType, targetId, targetKey, groupId, creatorId;
     public AssetAccesses assetAccesses;

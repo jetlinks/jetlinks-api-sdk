@@ -7,8 +7,9 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Duration;
 
 /**
- * Servlet adapter for the same verified/durable notification pipeline; blocking is confined to the
- * servlet boundary. @since 2.0
+ * Servlet 通知适配；复用验签和可靠受理流程，阻塞仅限 Servlet 边界。
+ *
+ * @since 2.0
  */
 @RestController
 public final class NotificationMvcEndpoint {
@@ -24,12 +25,8 @@ public final class NotificationMvcEndpoint {
         try {
             receiver.receive(headers, ServletBodies.read(request)).block(Duration.ofSeconds(30));
             return ResponseEntity.noContent().build();
-        } catch (ServletBodies.TooLarge e) {
-            return ResponseEntity.status(413).build();
-        } catch (SecurityException | IllegalArgumentException e) {
-            return ResponseEntity.status(401).build();
         } catch (RuntimeException | java.io.IOException e) {
-            return ResponseEntity.status(503).build();
+            return ResponseEntity.status(EndpointErrors.notificationStatus(e)).build();
         }
     }
 }

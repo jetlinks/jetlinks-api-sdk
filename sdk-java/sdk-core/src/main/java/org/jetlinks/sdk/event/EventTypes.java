@@ -1,9 +1,8 @@
 package org.jetlinks.sdk.event;
 
 /**
- * Known platform notification types. Catalog event IDs equal StructuredEvent.type;
- * availability for subscription is determined by the live catalog.
- * Event instance IDs are generated per occurrence; custom type strings remain supported.
+ * 平台已知通知类型；事件目录 ID 与事件 type 相同，可订阅性以实时目录为准。事件实例 ID 每次生成，自定义类型仍使用字符串。
+ *
  * @since 2.0
  */
 public final class EventTypes {
@@ -18,13 +17,20 @@ public final class EventTypes {
     public static final String APPLICATION_CREDENTIAL_SYNCED = "application.credential.synced";
     public static final String APPLICATION_SYNC_CHANGED = "application.sync.changed";
 
-    /** Custom types are delivered normally, but are not interpreted as application lifecycle. */
+    /** 自定义类型正常投递，但不参与应用生命周期合并。 */
     public static boolean isApplicationEvent(String type) {
         return java.util.Arrays.asList(
-                APPLICATION_CREATED, APPLICATION_UPDATED, APPLICATION_ENABLED,
-                APPLICATION_DISABLED, APPLICATION_DELETED, APPLICATION_USER_BOUND,
-                APPLICATION_USER_UNBOUND, APPLICATION_CREDENTIAL_ROTATED,
-                APPLICATION_CREDENTIAL_SYNCED, APPLICATION_SYNC_CHANGED).contains(type);
+                        APPLICATION_CREATED,
+                        APPLICATION_UPDATED,
+                        APPLICATION_ENABLED,
+                        APPLICATION_DISABLED,
+                        APPLICATION_DELETED,
+                        APPLICATION_USER_BOUND,
+                        APPLICATION_USER_UNBOUND,
+                        APPLICATION_CREDENTIAL_ROTATED,
+                        APPLICATION_CREDENTIAL_SYNCED,
+                        APPLICATION_SYNC_CHANGED)
+                .contains(type);
     }
 
     private EventTypes() {}

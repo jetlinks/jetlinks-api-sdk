@@ -209,10 +209,7 @@ class CommandTest {
         CommandService service =
                 new CommandService((p, a) -> Mono.just(state()), 1)
                         .onError(failures::add)
-                        .register(
-                                "Fail",
-                                false,
-                                (a, n) -> Mono.error(cause));
+                        .register("Fail", false, (a, n) -> Mono.error(cause));
         CommandService.Response r =
                 service.handle(
                                 "POST",
@@ -234,7 +231,7 @@ class CommandTest {
         assertEquals(0, service.inFlight());
         CommandService empty = new CommandService((p, a) -> Mono.empty(), 1);
         assertThrows(
-                SecurityException.class,
+                SdkException.class,
                 () ->
                         empty.handle(
                                         "GET",
@@ -248,16 +245,27 @@ class CommandTest {
     void streamingFailureRetainsOriginalCauseAndReleasesBudget() {
         IllegalStateException cause = new IllegalStateException("stream failed");
         List<CommandService.Failure> failures = new ArrayList<>();
-        CommandService service = new CommandService((p, a) -> Mono.just(state()), 1)
-                .onError(failures::add)
-                .register("Stream", true, (a, n) -> Flux.just(1).concatWith(Mono.error(cause)));
-        try (CommandService.Response response = service.handle("POST", "/api/commands/1/Stream",
-                headers("POST", "/api/commands/1/Stream"), new byte[0]).block()) {
+        CommandService service =
+                new CommandService((p, a) -> Mono.just(state()), 1)
+                        .onError(failures::add)
+                        .register(
+                                "Stream",
+                                true,
+                                (a, n) -> Flux.just(1).concatWith(Mono.error(cause)));
+        try (CommandService.Response response =
+                service.handle(
+                                "POST",
+                                "/api/commands/1/Stream",
+                                headers("POST", "/api/commands/1/Stream"),
+                                new byte[0])
+                        .block()) {
             assertEquals(200, response.status);
             assertNotNull(response.headers.get("X-Signature"));
             assertTrue(failures.isEmpty());
-            StepVerifier.create(response.body).expectNextCount(1)
-                    .expectErrorMatches(error -> error == cause).verify();
+            StepVerifier.create(response.body)
+                    .expectNextCount(1)
+                    .expectErrorMatches(error -> error == cause)
+                    .verify();
             assertEquals(1, failures.size());
             assertSame(cause, failures.get(0).cause);
             assertEquals("Stream", failures.get(0).commandId);
@@ -270,12 +278,24 @@ class CommandTest {
         char[] text = new char[1024 * 1024];
         Arrays.fill(text, 'x');
         List<CommandService.Failure> failures = new ArrayList<>();
-        CommandService service = new CommandService((p, a) -> Mono.just(state()), 1)
-                .onError(failures::add)
-                .register("Large", false, (a, n) -> Mono.just(new String(text)));
-        try (CommandService.Response response = service.handle("POST", "/api/commands/1/Large",
-                headers("POST", "/api/commands/1/Large"), new byte[0]).block()) {
-            StepVerifier.create(response.body).expectError(IllegalArgumentException.class).verify();
+        CommandService service =
+                new CommandService((p, a) -> Mono.just(state()), 1)
+                        .onError(failures::add)
+                        .register("Large", false, (a, n) -> Mono.just(new String(text)));
+        try (CommandService.Response response =
+                service.handle(
+                                "POST",
+                                "/api/commands/1/Large",
+                                headers("POST", "/api/commands/1/Large"),
+                                new byte[0])
+                        .block()) {
+            StepVerifier.create(response.body)
+                    .expectErrorMatches(
+                            error ->
+                                    error instanceof SdkException
+                                            && ((SdkException) error).code
+                                                    == SdkException.Code.LIMIT_EXCEEDED)
+                    .verify();
             assertEquals(1, failures.size());
             assertEquals("Large", failures.get(0).commandId);
             assertEquals(0, service.inFlight());
@@ -286,11 +306,19 @@ class CommandTest {
     void defaultLoggingAndFailingObserverPreserveCauseAndSignedError() {
         Logger logger = Logger.getLogger(CommandService.class.getName());
         List<LogRecord> records = new ArrayList<>();
-        Handler capture = new Handler() {
-            @Override public void publish(LogRecord record) { records.add(record); }
-            @Override public void flush() {}
-            @Override public void close() {}
-        };
+        Handler capture =
+                new Handler() {
+                    @Override
+                    public void publish(LogRecord record) {
+                        records.add(record);
+                    }
+
+                    @Override
+                    public void flush() {}
+
+                    @Override
+                    public void close() {}
+                };
         boolean useParents = logger.getUseParentHandlers();
         java.util.logging.Level level = logger.getLevel();
         logger.setUseParentHandlers(false);
@@ -299,25 +327,36 @@ class CommandTest {
         try {
             IllegalStateException cause = new IllegalStateException("handler failed");
             IllegalStateException observerError = new IllegalStateException("observer failed");
-            CommandService service = new CommandService((p, a) -> Mono.just(state()), 1)
-                    .register("Fail", false, (a, n) -> Mono.error(cause));
+            CommandService service =
+                    new CommandService((p, a) -> Mono.just(state()), 1)
+                            .register("Fail", false, (a, n) -> Mono.error(cause));
             String target = "/api/commands/1/Fail";
-            try (CommandService.Response response = service.handle("POST", target,
-                    headers("POST", target), new byte[0]).block()) {
+            try (CommandService.Response response =
+                    service.handle("POST", target, headers("POST", target), new byte[0]).block()) {
                 assertEquals(500, response.status);
-                assertEquals("Command failed", Json.parse(response.body.blockFirst()).path("error").asText());
+                assertEquals(
+                        "Command failed",
+                        Json.parse(response.body.blockFirst()).path("error").asText());
             }
             assertEquals(1, records.size());
             assertSame(cause, records.get(0).getThrown());
-            assertTrue(records.get(0).getMessage().contains("requestId=0123456789abcdef0123456789abcdef"));
+            assertTrue(
+                    records.get(0)
+                            .getMessage()
+                            .contains("requestId=0123456789abcdef0123456789abcdef"));
             assertTrue(records.get(0).getMessage().contains("commandId=Fail"));
             records.clear();
-            service.onError(failure -> { throw observerError; });
-            try (CommandService.Response response = service.handle("POST", target,
-                    headers("POST", target), new byte[0]).block()) {
+            service.onError(
+                    failure -> {
+                        throw observerError;
+                    });
+            try (CommandService.Response response =
+                    service.handle("POST", target, headers("POST", target), new byte[0]).block()) {
                 assertEquals(500, response.status);
                 assertNotNull(response.headers.get("X-Signature"));
-                assertEquals("Command failed", Json.parse(response.body.blockFirst()).path("error").asText());
+                assertEquals(
+                        "Command failed",
+                        Json.parse(response.body.blockFirst()).path("error").asText());
             }
             assertEquals(2, records.size());
             assertSame(cause, records.get(0).getThrown());

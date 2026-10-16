@@ -4,7 +4,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Current authenticated subject, application and effective functional permissions. @since 2.0 */
+/**
+ * 当前已认证主体、应用及生效的功能权限。
+ *
+ * @since 2.0
+ */
 public class AuthorizationContext {
     public Subject subject;
     public Application application;

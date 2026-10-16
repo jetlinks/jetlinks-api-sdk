@@ -45,7 +45,9 @@ JetLinksReactiveClient client = new JetLinksReactiveClient(apiBaseUrl, oauth.mac
 
 自签 Token 仍由平台验证密钥、有效期和权限，不是 JWT，也不携带自定义用户身份。Secret 仅放服务端，使用 HTTPS；有效期应与平台配置一致（通常 2 分钟），保持时钟同步。它的安全边界与共享密钥认证一致，无法替代用户登录。
 
-请求路径相对可信 API 地址拼接，保留网关前缀；动态路径段使用 `ApiRequest.segment(id)`，query 使用 `.query(name, value)`。默认解包平台的 `result`，原生响应使用 `.raw()`，完整状态和 Header 使用 `exchange()`。`SdkException` 保留 HTTP 状态和错误 JSON；SDK 不自动重放 401 写请求。
+请求路径相对可信 API 地址拼接，保留网关前缀；动态路径段使用 `ApiRequest.segment(id)`，query 使用 `.query(name, value)`。默认解包平台的 `result`，原生响应使用 `.raw()`，完整状态和 Header 使用 `exchange()`。SDK 不自动重放 401 写请求。
+
+SDK 自身的错误统一为 `SdkException`，通过 `code` 区分参数、状态、鉴权、编解码、加密、容量、远端和传输错误；通过 `getCause()` 查看原始原因。`REMOTE_ERROR` 的 `status/response` 保留远端状态和正文，本地错误的 `status` 为 0；不要把完整异常或远端正文直接返回给用户。自定义处理器、存储和认证扩展抛出的异常保留原样，响应式客户端通过错误信号传播。
 
 泛型及流：
 

@@ -2,7 +2,11 @@ package org.jetlinks.sdk.model;
 
 import java.util.List;
 
-/** Role menu/button grant projection. @since 2.0 */
+/**
+ * 角色的菜单及按钮授权信息。
+ *
+ * @since 2.0
+ */
 public class RoleMenu extends Extensible {
     public String menuId;
     public List<Button> buttons;

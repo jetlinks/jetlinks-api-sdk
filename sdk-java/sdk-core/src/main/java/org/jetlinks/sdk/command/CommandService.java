@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.jetlinks.sdk.Json;
+import org.jetlinks.sdk.SdkException;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.TypeRef;
 import org.jetlinks.sdk.crypto.ProtocolHeaders;
 import org.jetlinks.sdk.crypto.Signatures;
@@ -26,8 +28,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Framework-independent signed command server. Credentials are request snapshots. Bodies remain
- * streaming; adapters must close abandoned responses.
+ * 独立于 Web 框架的签名命令服务。每次请求使用凭据快照，正文按需流式输出；适配器必须关闭未消费的响应。
  *
  * @since 2.0
  */
@@ -39,9 +40,7 @@ public final class CommandService {
     private static final Logger LOGGER = Logger.getLogger(CommandService.class.getName());
 
     /**
-     * Server-side command failure with verified correlation identifiers and the original cause.
-     * Contains no credentials, request body or query string; never include it in the HTTP response.
-     * The application owns any retention and redaction of the cause supplied by its handler.
+     * 命令失败的服务端诊断信息，包含验签后的关联标识和原始原因，不包含凭据、请求正文或查询参数。 不应序列化到 HTTP 响应；处理器异常中的敏感信息由应用自行脱敏。
      *
      * @since 2.0
      * @see CommandService#onError(Consumer)
@@ -60,18 +59,34 @@ public final class CommandService {
     }
 
     /**
-     * Resolve an active instance asynchronously. Empty rejects the request; errors propagate
-     * without executing it.
+     * 异步查找当前有效的应用实例。返回空值拒绝请求，失败直接传播且不执行命令。
+     *
+     * @since 2.0
      */
     public interface Credentials {
+        /**
+         * 按已提供的区域和应用 ID 查询凭据快照；SDK 随后检查启用状态、归属和签名。
+         *
+         * @return 有效实例，找不到时返回空 Mono
+         * @since 2.0
+         */
         Mono<ApplicationState> resolve(String platform, String application);
     }
 
     /**
-     * Called after verification. Must remain nonblocking; business side effects require their own
-     * idempotency.
+     * 验签后调用的业务处理器。实现必须非阻塞，业务副作用由应用自行保证幂等。
+     *
+     * @since 2.0
      */
     public interface Handler<T> {
+        /**
+         * 执行单结果或流式命令；参数已解码，保留身份字段已由 SDK 覆盖。
+         *
+         * @param application 本次请求的可信应用快照
+         * @param parameters 注册时指定类型的参数
+         * @return 按需输出的业务结果；取消信号应传递给底层任务
+         * @since 2.0
+         */
         Publisher<?> execute(ApplicationState application, T parameters);
     }
 
@@ -110,20 +125,18 @@ public final class CommandService {
     private volatile Consumer<Failure> errorHandler = CommandService::logFailure;
 
     public CommandService(Credentials credentials, int maxConcurrency) {
-        if (maxConcurrency < 1) throw new IllegalArgumentException("Invalid concurrency");
+        if (maxConcurrency < 1)
+            throw new SdkException(Code.INVALID_ARGUMENT, "Invalid concurrency");
         this.credentials = credentials;
         this.maxConcurrency = maxConcurrency;
     }
 
     /**
-     * Observes failures after request verification, before conversion to a signed error or stream
-     * termination. The default writes to the JDK logger named after this class. The callback runs
-     * on the request/output thread and must be nonblocking; it may be called concurrently. Observer
-     * exceptions are logged without replacing the command failure or preventing budget release.
-     * Signature rejections, cancellation and normal 404/429/503 responses are not reported here.
+     * 观察验签后的命令失败，默认写入本类的 JDK Logger。观察器在请求或输出线程调用，必须非阻塞且支持并发。 观察器失败不替换原始异常，也不阻止并发名额释放；签名拒绝、取消及正常的
+     * 404/429/503 不通知此观察器。
      *
-     * @param handler non-null server-side observer; do not serialize the failure to an HTTP client
-     * @return this service for configuration before serving requests
+     * @param handler 非空服务端观察器，不应将诊断信息返回给客户端
+     * @return 当前服务，应在接收请求前完成配置
      * @since 2.0
      * @see Failure
      */
@@ -133,11 +146,16 @@ public final class CommandService {
     }
 
     private static void logFailure(Failure failure) {
-        LOGGER.log(Level.WARNING,
-                "Command failed: platformId=" + failure.platformId
-                        + ", applicationId=" + failure.applicationId
-                        + ", requestId=" + failure.requestId
-                        + ", commandId=" + failure.commandId,
+        LOGGER.log(
+                Level.WARNING,
+                "Command failed: platformId="
+                        + failure.platformId
+                        + ", applicationId="
+                        + failure.applicationId
+                        + ", requestId="
+                        + failure.requestId
+                        + ", commandId="
+                        + failure.commandId,
                 failure.cause);
     }
 
@@ -146,18 +164,21 @@ public final class CommandService {
         try {
             errorHandler.accept(failure);
         } catch (RuntimeException observerError) {
-            // Diagnostics cannot replace a signed error or leak its concurrency permit.
+            // 诊断失败不能替换协议错误，也不能阻止并发名额释放。
             logFailure(failure);
             LOGGER.log(Level.WARNING, "Command error observer failed", observerError);
         }
     }
 
-    public CommandService register(String id, boolean stream, Handler<Map<String, Object>> handler) {
+    public CommandService register(
+            String id, boolean stream, Handler<Map<String, Object>> handler) {
         return register(id, stream, handler, a -> true);
     }
 
     public CommandService register(
-            String id, boolean stream, Handler<Map<String, Object>> handler,
+            String id,
+            boolean stream,
+            Handler<Map<String, Object>> handler,
             Predicate<ApplicationState> allowed) {
         return register(id, stream, new TypeRef<Map<String, Object>>() {}, handler, allowed);
     }
@@ -173,35 +194,42 @@ public final class CommandService {
     }
 
     public <T> CommandService register(
-            String id, boolean stream, Class<T> type, Handler<T> handler,
+            String id,
+            boolean stream,
+            Class<T> type,
+            Handler<T> handler,
             Predicate<ApplicationState> allowed) {
         return register(id, stream, TypeRef.of(type), handler, allowed);
     }
 
-    /** Parameters are decoded only after signature verification and trusted identity injection. */
+    /** 仅在验签并注入可信应用身份后，才将命令参数转换成指定类型。 */
     public <T> CommandService register(
-            String id, boolean stream, TypeRef<T> type, Handler<T> handler,
+            String id,
+            boolean stream,
+            TypeRef<T> type,
+            Handler<T> handler,
             Predicate<ApplicationState> allowed) {
         Objects.requireNonNull(type);
         Objects.requireNonNull(handler);
         Objects.requireNonNull(allowed);
-        Handler<JsonNode> decoder = (application, input) ->
-                handler.execute(application, Json.convert(input, type));
+        Handler<JsonNode> decoder =
+                (application, input) -> handler.execute(application, Json.convert(input, type));
         if (id == null
                 || id.isEmpty()
                 || definitions.size() >= 4096
                 || definitions.putIfAbsent(id, new Definition(stream, decoder, allowed)) != null)
-            throw new IllegalArgumentException("Duplicate command or registry full");
+            throw new SdkException(Code.INVALID_ARGUMENT, "Duplicate command or registry full");
         return this;
     }
 
-    /**
-     * Optional local schema/metadata; it does not alter the wire capability list or define support.
-     */
+    /** 可选的本地参数元数据，不改变线上能力列表；命令是否支持由注册情况决定。 */
     public CommandService metadata(String id, Map<String, Object> metadata) {
         Definition d = definitions.get(id);
-        if (d == null) throw new IllegalArgumentException("Unknown command");
-        d.metadata = metadata == null ? null : Json.convert(metadata, new TypeRef<Map<String, Object>>() {});
+        if (d == null) throw new SdkException(Code.INVALID_ARGUMENT, "Unknown command");
+        d.metadata =
+                metadata == null
+                        ? null
+                        : Json.convert(metadata, new TypeRef<Map<String, Object>>() {});
         return this;
     }
 
@@ -212,6 +240,7 @@ public final class CommandService {
                 : Optional.of(Json.convert(d.metadata, new TypeRef<Map<String, Object>>() {}));
     }
 
+    /** 仅列出当前应用允许执行的已注册命令；列表按 ID 排序。 */
     public List<String> capabilities(ApplicationState application) {
         List<String> ids = new ArrayList<>();
         definitions.forEach(
@@ -222,10 +251,12 @@ public final class CommandService {
         return Collections.unmodifiableList(ids);
     }
 
+    /** 当前占用并发名额的请求数，供服务端监控使用。 */
     public int inFlight() {
         return inFlight.get();
     }
 
+    /** 验签后按应用分配并发预算，再执行命令；未消费响应必须显式关闭。 */
     public Mono<Response> handle(
             String method, String target, Map<String, List<String>> headers, byte[] body) {
         return Mono.defer(() -> verify(method, target, headers))
@@ -244,22 +275,29 @@ public final class CommandService {
         ProtocolHeaders h = new ProtocolHeaders(trimmed);
         h.version();
         h.timestamp(System.currentTimeMillis(), 300000);
-        String platform = h.required(ProtocolHeaders.PLATFORM_ID), app = h.required(ProtocolHeaders.APPLICATION_ID);
+        String platform = h.required(ProtocolHeaders.PLATFORM_ID),
+                app = h.required(ProtocolHeaders.APPLICATION_ID);
         String key = h.required(ProtocolHeaders.KEY_ID),
                 id = h.required(ProtocolHeaders.REQUEST_ID),
                 signature = h.required(ProtocolHeaders.SIGNATURE);
         if (!platform.matches("[!-~]{1,128}") || !id.matches("[a-f0-9]{32}"))
-            throw new SecurityException("Invalid command identity");
+            throw new SdkException(Code.AUTHENTICATION, "Invalid command identity");
         return credentials
                 .resolve(platform, app)
-                .switchIfEmpty(Mono.error(new SecurityException("Unknown command application")))
+                .switchIfEmpty(
+                        Mono.error(
+                                () ->
+                                        new SdkException(
+                                                Code.AUTHENTICATION,
+                                                "Unknown command application")))
                 .map(
                         state -> {
                             if (!state.active()
                                     || !platform.equals(state.platformId)
                                     || !app.equals(state.applicationId)
                                     || !key.equals(state.accessKey))
-                                throw new SecurityException(
+                                throw new SdkException(
+                                        Code.AUTHENTICATION,
                                         "Inactive command credential or ownership mismatch");
                             String expected =
                                     Signatures.sign(
@@ -277,7 +315,8 @@ public final class CommandService {
                                             h.optional("Content-Type"),
                                             h.optional("Accept"));
                             if (!Signatures.matches(expected, signature))
-                                throw new SecurityException("Command signature rejected");
+                                throw new SdkException(
+                                        Code.AUTHENTICATION, "Command signature rejected");
                             return new Verified(state, id, signature, method, target);
                         });
     }
@@ -286,8 +325,7 @@ public final class CommandService {
         String id = Signatures.sha256(Signatures.lp(state.platformId, state.applicationId));
         Semaphore existing = budgets.get(id);
         if (existing != null) return existing;
-        // Evict only idle identities. In-flight requests keep their budget across credential
-        // rotation.
+        // 只淘汰空闲身份；凭据轮换期间，在途请求继续使用同一并发预算。
         if (budgets.size() >= 1024) {
             Iterator<Map.Entry<String, Semaphore>> entries = budgets.entrySet().iterator();
             while (entries.hasNext())
@@ -304,8 +342,7 @@ public final class CommandService {
 
     private Mono<Response> execute(Verified v, byte[] body) {
         Semaphore budget;
-        // Selection and acquisition share the eviction lock so an idle budget cannot be
-        // replaced between lookup and acquisition, splitting one application's limit.
+        // 预算查找与获取名额共用淘汰锁，防止同一应用在两步之间被拆成多个预算。
         synchronized (this) {
             budget = budgetFor(v.state);
             if (budget == null) return Mono.just(error(v, 503, () -> {}));
@@ -346,25 +383,34 @@ public final class CommandService {
     }
 
     private Mono<Response> executeCommand(
-            Verified request, String commandId, Definition definition, byte[] body, Runnable release) {
+            Verified request,
+            String commandId,
+            Definition definition,
+            byte[] body,
+            Runnable release) {
         JsonNode parameters = body.length == 0 ? Json.MAPPER.createObjectNode() : Json.parse(body);
         if (parameters.isObject())
             ((ObjectNode) parameters)
                     .put("applicationId", request.state.applicationId)
                     .put("templateId", request.state.templateId);
-        Flux<JsonNode> values = Flux.defer(
-                        () -> Flux.from(definition.handler.execute(request.state.copy(), parameters)))
-                .map(Json::tree)
-                .timeout(Duration.ofSeconds(30));
+        Flux<JsonNode> values =
+                Flux.defer(
+                                () ->
+                                        Flux.from(
+                                                definition.handler.execute(
+                                                        request.state.copy(), parameters)))
+                        .map(Json::tree)
+                        .timeout(Duration.ofSeconds(30));
         if (definition.stream)
             return Mono.just(response(request, 200, true, commandId, values, release));
         return values.singleOrEmpty()
                 .defaultIfEmpty(Json.MAPPER.nullNode())
                 .map(value -> response(request, 200, false, commandId, Flux.just(value), release))
-                .onErrorResume(error -> {
-                    reportFailure(request, commandId, error);
-                    return Mono.just(error(request, 500, release));
-                })
+                .onErrorResume(
+                        error -> {
+                            reportFailure(request, commandId, error);
+                            return Mono.just(error(request, 500, release));
+                        })
                 .doOnCancel(release);
     }
 
@@ -383,8 +429,12 @@ public final class CommandService {
     }
 
     private Response response(
-            Verified v, int status, boolean stream, String commandId,
-            Flux<JsonNode> values, Runnable release) {
+            Verified v,
+            int status,
+            boolean stream,
+            String commandId,
+            Flux<JsonNode> values,
+            Runnable release) {
         ApplicationState state = v.state;
         String time = Long.toString(System.currentTimeMillis()),
                 type = stream ? "application/x-ndjson" : "application/json";
@@ -416,23 +466,24 @@ public final class CommandService {
                                 value -> {
                                     byte[] bytes = Json.bytes(value);
                                     if (bytes.length > 1024 * 1024)
-                                        throw new IllegalArgumentException(
+                                        throw new SdkException(
+                                                Code.LIMIT_EXCEEDED,
                                                 "Command result exceeds limit");
                                     if (!stream) return bytes;
                                     byte[] line = Arrays.copyOf(bytes, bytes.length + 1);
                                     line[bytes.length] = 10;
                                     return line;
                                 })
-                        // Streaming/serialization failures occur after headers have been signed;
-                        // observe the original failure and terminate without rewriting that response.
+                        // 流式或序列化失败可能发生在响应头签名之后；保留原始异常并终止输出，不重写响应。
                         .doOnError(error -> reportFailure(v, commandId, error))
                         .doFinally(s -> release.run());
         return new Response(status, headers, body, release);
     }
 
     /**
-     * Subscribe to body once. Close abandoned responses, including failures before the HTTP writer
-     * subscribes.
+     * 正文只订阅一次。响应未交给 HTTP 写入器或被中途放弃时也必须关闭，以释放并发名额。
+     *
+     * @since 2.0
      */
     public static final class Response implements AutoCloseable {
         public final int status;

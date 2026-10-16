@@ -3,7 +3,11 @@ package org.jetlinks.sdk.subscription;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Candidate configuration validation returned by the platform. @since 2.0 */
+/**
+ * 平台返回的候选订阅配置校验结果。
+ *
+ * @since 2.0
+ */
 public class SubscriptionValidation {
     public boolean valid;
     public List<Issue> issues = new ArrayList<>();

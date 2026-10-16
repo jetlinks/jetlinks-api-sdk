@@ -1,5 +1,8 @@
 package org.jetlinks.sdk.crypto;
 
+import org.jetlinks.sdk.SdkException;
+import org.jetlinks.sdk.SdkException.Code;
+
 import java.io.*;
 import java.nio.*;
 import java.nio.charset.StandardCharsets;
@@ -11,8 +14,9 @@ import javax.crypto.*;
 import javax.crypto.spec.*;
 
 /**
- * Current v1 protocol primitives shared by notifications and commands. No legacy fallback. @since
- * 2.0
+ * 通知和命令共用的 v1 签名及凭据加解密原语。
+ *
+ * @since 2.0
  */
 public final class Signatures {
     private Signatures() {}
@@ -22,11 +26,12 @@ public final class Signatures {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret, "HmacSHA256"));
             return mac.doFinal(input);
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException(e);
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot compute credential signature", e);
         }
     }
 
+    /** 以 UTF-8 字节长度前缀和大端整数拼接字段，避免分隔符或字符长度造成歧义。 */
     public static byte[] lp(String... fields) {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -38,7 +43,7 @@ public final class Signatures {
             }
             return bytes.toByteArray();
         } catch (IOException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot compute credential signature", e);
         }
     }
 
@@ -57,7 +62,7 @@ public final class Signatures {
                 hex.append(String.format("%02x", b & 255));
             return hex.toString();
         } catch (GeneralSecurityException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot compute credential signature", e);
         }
     }
 
@@ -80,7 +85,7 @@ public final class Signatures {
             PrivateKey key =
                     KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
             Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
-            // JDK providers otherwise commonly default MGF1 to SHA-1 despite OAEP SHA-256.
+            // 显式指定 MGF1 的 SHA-256，避免部分 JDK 在 OAEP SHA-256 下仍默认使用 SHA-1。
             cipher.init(
                     Cipher.DECRYPT_MODE,
                     key,
@@ -91,8 +96,8 @@ public final class Signatures {
                             PSource.PSpecified.DEFAULT));
             return new String(
                     cipher.doFinal(Base64.getDecoder().decode(ciphertext)), StandardCharsets.UTF_8);
-        } catch (GeneralSecurityException e) {
-            throw new IllegalArgumentException("Cannot decrypt application credential", e);
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot decrypt application credential", e);
         }
     }
 }

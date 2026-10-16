@@ -7,7 +7,9 @@ import reactor.core.publisher.Flux;
 import java.util.*;
 
 /**
- * Transport-neutral Example response; adapters stream body and propagate cancellation. @since 2.0
+ * 与 HTTP 框架无关的示例响应；适配器负责流式输出并传递取消信号。
+ *
+ * @since 2.0
  */
 public final class ExampleResponse {
     public final int status;

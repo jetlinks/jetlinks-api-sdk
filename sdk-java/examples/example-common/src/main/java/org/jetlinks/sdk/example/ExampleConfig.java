@@ -3,6 +3,7 @@ package org.jetlinks.sdk.example;
 import com.fasterxml.jackson.databind.*;
 
 import org.jetlinks.sdk.*;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.notification.ApplicationState;
 
 import java.nio.charset.StandardCharsets;
@@ -10,8 +11,9 @@ import java.nio.file.*;
 import java.util.*;
 
 /**
- * Example-only configuration. Credentials stay in a local file, not the browser or shared UI
- * bundle. @since 2.0
+ * 示例专用配置；凭据只从本地文件加载，不传给浏览器或打包进前端。
+ *
+ * @since 2.0
  */
 public final class ExampleConfig {
     public String host = "127.0.0.1",
@@ -34,15 +36,17 @@ public final class ExampleConfig {
                             Files.readAllBytes(Paths.get(t.privateKeyFile)),
                             StandardCharsets.US_ASCII);
                 } catch (java.io.IOException e) {
-                    throw new IllegalStateException("Cannot read receiver private key", e);
+                    throw new SdkException(
+                            Code.INVALID_STATE, "Cannot read receiver private key", e);
                 }
             }
-        throw new IllegalArgumentException("Unknown receiver key");
+        throw new SdkException(Code.INVALID_ARGUMENT, "Unknown receiver key");
     }
 
     /**
-     * Fixed API application channel, optionally with separately authorized user/management Tokens
-     * for the demonstration.
+     * 固定 API 应用通道；可额外配置演示所需的用户或管理 Token。
+     *
+     * @since 2.0
      */
     public static final class ApiApplication {
         public String contextId,
@@ -65,8 +69,9 @@ public final class ExampleConfig {
     }
 
     /**
-     * Template trust bootstrap; platformId matches the platform template, not an additional region
-     * discovery setting.
+     * 模版信任配置；platformId 与平台模版保持一致，无需额外的区域发现配置。
+     *
+     * @since 2.0
      */
     public static final class Template {
         public String platformId,

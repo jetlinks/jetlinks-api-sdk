@@ -1,14 +1,16 @@
 package org.jetlinks.sdk.spring;
 
 import org.jetlinks.sdk.*;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.auth.*;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;
 
 /**
- * Optional single-client auto configuration; no receiver is exposed without explicit verified
- * processing beans. @since 2.0
+ * 单客户端自动配置；仅在显式提供验签和处理 Bean 后开放接收端点。
+ *
+ * @since 2.0
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(JetLinksProperties.class)
@@ -30,7 +32,7 @@ public class JetLinksAutoConfiguration {
                 return OAuth2.localTokens(
                         p.getKey(), p.getSecret(), p.getScopes(), p.getLocalTokenTtl());
             if (!"oauth2".equals(p.getAuthMode()))
-                throw new IllegalArgumentException("Unsupported auth-mode");
+                throw new SdkException(Code.INVALID_ARGUMENT, "Unsupported auth-mode");
             return oauth.machineTokens(p.getScopes());
         }
 

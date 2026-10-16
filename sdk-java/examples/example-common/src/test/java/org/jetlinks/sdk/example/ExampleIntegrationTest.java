@@ -153,7 +153,7 @@ class ExampleIntegrationTest {
                                     return res.sendString(
                                             Mono.just(
                                                     "{\"result\":{\"message\":\"real HTTP"
-                                                        + " result\"}}"));
+                                                            + " result\"}}"));
                                 })
                         .bindNow();
         String base = "http://127.0.0.1:" + platform.port() + "/gateway";

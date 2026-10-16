@@ -4,13 +4,14 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 
 import org.jetlinks.sdk.*;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.auth.*;
 import org.jetlinks.sdk.command.*;
-import org.jetlinks.sdk.crypto.Signatures;
 import org.jetlinks.sdk.crypto.ProtocolHeaders;
+import org.jetlinks.sdk.crypto.Signatures;
 import org.jetlinks.sdk.model.*;
-import org.jetlinks.sdk.subscription.SubscriptionConfig;
 import org.jetlinks.sdk.notification.*;
+import org.jetlinks.sdk.subscription.SubscriptionConfig;
 
 import reactor.core.Disposable;
 import reactor.core.publisher.*;
@@ -24,8 +25,9 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * Shared real Example workflows. Both HTTP launchers delegate here; all platform protocols go
- * through sdk-core. @since 2.0
+ * 共用的真实接入示例流程，两种 HTTP 启动方式都委托此类，平台协议统一使用 sdk-core。
+ *
+ * @since 2.0
  */
 public final class ExampleService implements AutoCloseable {
     public final ExampleConfig config;
@@ -81,12 +83,7 @@ public final class ExampleService implements AutoCloseable {
                                 WatchUsage.class,
                                 (a, n) ->
                                         Flux.interval(Duration.ofMillis(200))
-                                                .take(
-                                                        Math.min(
-                                                                100,
-                                                                Math.max(
-                                                                        1,
-                                                                        n.limit)))
+                                                .take(Math.min(100, Math.max(1, n.limit)))
                                                 .map(
                                                         i ->
                                                                 map(
@@ -97,10 +94,7 @@ public final class ExampleService implements AutoCloseable {
                                                                                 .currentTimeMillis())));
     }
 
-    /**
-     * One owned worker at the service boundary; coalesces notifications and retries failed fact
-     * reads on later ticks.
-     */
+    /** 服务边界拥有的单一同步任务；合并通知触发，事实查询失败时在后续轮次重试。 */
     public void start() {
         worker =
                 Flux.interval(Duration.ZERO, Duration.ofSeconds(5))
@@ -180,23 +174,42 @@ public final class ExampleService implements AutoCloseable {
             String method, String target, Map<String, List<String>> headers, byte[] body) {
         return Mono.defer(() -> route(method, target, headers, body))
                 .onErrorResume(
-                        e ->
+                        error ->
                                 Mono.just(
                                         ExampleResponse.error(
-                                                e instanceof SecurityException
-                                                        ? 401
-                                                        : e instanceof IllegalArgumentException
-                                                                ? 400
-                                                                : e instanceof SdkException
-                                                                        ? ((SdkException) e).status
-                                                                        : 502,
-                                                e instanceof SecurityException
-                                                        ? "Request authentication rejected"
-                                                        : e instanceof IllegalArgumentException
-                                                                ? "Invalid request or configuration"
-                                                                : "Operation failed; check platform"
-                                                                        + " access and"
-                                                                        + " configuration")));
+                                                errorStatus(error),
+                                                "Operation failed; check access and"
+                                                        + " configuration")));
+    }
+
+    // 响应只暴露分类后的状态，异常中的远端正文和凭据不进入前端。
+    private static int errorStatus(Throwable error) {
+        if (error instanceof SdkException) {
+            SdkException failure = (SdkException) error;
+            switch (failure.code) {
+                case AUTHENTICATION:
+                    return 401;
+                case INVALID_ARGUMENT:
+                case SERIALIZATION:
+                    return 400;
+                case LIMIT_EXCEEDED:
+                    return 413;
+                case REMOTE_ERROR:
+                    return failure.status;
+                default:
+                    return 502;
+            }
+        }
+        if (error instanceof SecurityException) return 401;
+        if (error instanceof IllegalArgumentException) return 400;
+        return 502;
+    }
+
+    private static boolean rejectedNotification(Throwable error) {
+        return errorStatus(error) == 401
+                || errorStatus(error) == 400
+                || error instanceof SdkException
+                        && ((SdkException) error).code == Code.CRYPTOGRAPHY;
     }
 
     private Mono<ExampleResponse> route(
@@ -221,15 +234,15 @@ public final class ExampleService implements AutoCloseable {
                     .flatMap(this::acceptNotification)
                     .onErrorResume(
                             e ->
-                                    e instanceof SecurityException
-                                                    || e instanceof IllegalArgumentException
+                                    rejectedNotification(e)
                                             ? store.rejected(body)
                                                     .thenReturn(
                                                             ExampleResponse.error(
                                                                     401, "Notification rejected"))
                                             : Mono.just(
                                                     ExampleResponse.error(
-                                                            503, "Durable receipt failed")));
+                                                            errorStatus(e) == 413 ? 413 : 503,
+                                                            "Durable receipt failed")));
         }
         if (path.equals("/api/capabilities") || path.startsWith("/api/commands/1/")) {
             return commands.handle(method, target, headers, body)
@@ -237,8 +250,12 @@ public final class ExampleService implements AutoCloseable {
                             r -> {
                                 ObjectNode record = Json.MAPPER.createObjectNode();
                                 record.put("requestId", r.headers.get(ProtocolHeaders.REQUEST_ID))
-                                        .put("platformId", r.headers.get(ProtocolHeaders.PLATFORM_ID))
-                                        .put("applicationId", r.headers.get(ProtocolHeaders.APPLICATION_ID))
+                                        .put(
+                                                "platformId",
+                                                r.headers.get(ProtocolHeaders.PLATFORM_ID))
+                                        .put(
+                                                "applicationId",
+                                                r.headers.get(ProtocolHeaders.APPLICATION_ID))
                                         .put("target", target)
                                         .put("status", r.status)
                                         .put("receivedAt", System.currentTimeMillis());
@@ -337,7 +354,11 @@ public final class ExampleService implements AutoCloseable {
             String[] parts = path.substring("/example-api/applications/".length()).split("/", 2);
             String context = parts[0], action = parts.length == 1 ? "" : parts[1];
             return state(context)
-                    .switchIfEmpty(Mono.error(new IllegalArgumentException("Unknown application")))
+                    .switchIfEmpty(
+                            Mono.error(
+                                    () ->
+                                            new SdkException(
+                                                    Code.INVALID_ARGUMENT, "Unknown application")))
                     .flatMap(s -> application(method, context, action, s, body));
         }
         if ("GET".equals(method) && !path.startsWith("/example-api/")) return staticFile(path);
@@ -399,8 +420,10 @@ public final class ExampleService implements AutoCloseable {
 
     private Mono<ExampleResponse> application(
             String method, String context, String action, ApplicationState state, byte[] raw) {
-        ExampleOperation input = raw.length == 0 ? new ExampleOperation()
-                : Json.read(raw, TypeRef.of(ExampleOperation.class));
+        ExampleOperation input =
+                raw.length == 0
+                        ? new ExampleOperation()
+                        : Json.read(raw, TypeRef.of(ExampleOperation.class));
         if (action.isEmpty()) return Mono.just(ExampleResponse.json(publicState(context, state)));
         if (action.equals("login")) return login(context, state, input);
         if (action.equals("commands"))
@@ -441,16 +464,15 @@ public final class ExampleService implements AutoCloseable {
                         .collectList()
                         .map(ExampleResponse::json);
             if ("assets".equals(op)) return business.assets(role).map(ExampleResponse::json);
-            Mono<AuthorizationSnapshot> snapshot = "POST".equals(method)
-                    ? synchronize(context, state) : Mono.justOrEmpty(snapshots.get(context));
+            Mono<AuthorizationSnapshot> snapshot =
+                    "POST".equals(method)
+                            ? synchronize(context, state)
+                            : Mono.justOrEmpty(snapshots.get(context));
             return snapshot.map(ExampleResponse::json)
                     .defaultIfEmpty(ExampleResponse.json(map("state", "not synchronized")));
         }
         if (action.equals("requests")) {
-            ApiRequest request =
-                    ApiRequest.of(
-                            input.method,
-                            input.path);
+            ApiRequest request = ApiRequest.of(input.method, input.path);
             if (input.body != null) request.body(input.body);
             if (input.stream)
                 return Mono.just(
@@ -491,21 +513,25 @@ public final class ExampleService implements AutoCloseable {
                     client(
                             context,
                             state,
-                            managementToken(context) == null
-                                    ? input.authMode
-                                    : "management");
+                            managementToken(context) == null ? input.authMode : "management");
             Subscriptions subscriptions = new Subscriptions(management.client, state.applicationId);
             String op = input.operation, id = input.id;
             Mono<?> result;
             switch (op) {
                 case "create":
-                    result = subscriptions.create(Json.convert(input.body, SubscriptionConfig.class));
+                    result =
+                            subscriptions.create(
+                                    Json.convert(input.body, SubscriptionConfig.class));
                     break;
                 case "update":
-                    result = subscriptions.update(id, Json.convert(input.body, SubscriptionConfig.class));
+                    result =
+                            subscriptions.update(
+                                    id, Json.convert(input.body, SubscriptionConfig.class));
                     break;
                 case "validate":
-                    result = subscriptions.validate(Json.convert(input.body, SubscriptionConfig.class));
+                    result =
+                            subscriptions.validate(
+                                    Json.convert(input.body, SubscriptionConfig.class));
                     break;
                 case "enable":
                     result = subscriptions.enable(id, true);
@@ -532,11 +558,7 @@ public final class ExampleService implements AutoCloseable {
                     result = subscriptions.records(id, new Query());
                     break;
                 case "payload":
-                    result =
-                            subscriptions.payload(
-                                    id,
-                                    input.taskId,
-                                    input.attempt);
+                    result = subscriptions.payload(id, input.taskId, input.attempt);
                     break;
                 default:
                     result = subscriptions.query(new Query());
@@ -547,35 +569,55 @@ public final class ExampleService implements AutoCloseable {
     }
 
     private Mono<AuthorizationSnapshot> synchronize(String id, ApplicationState state) {
-        if (!state.active()) return Mono.error(new IllegalStateException("Inactive application"));
-        SnapshotSynchronizer<AuthorizationSnapshot> sync = synchronizers.computeIfAbsent(
-                id, key -> new SnapshotSynchronizer<>(() -> loadSnapshot(id).flux(), 1));
-        return sync.refresh().map(values -> {
-            AuthorizationSnapshot snapshot = values.get(0);
-            snapshots.put(id, snapshot);
-            syncStatus = "synchronized";
-            return snapshot;
-        });
+        if (!state.active())
+            return Mono.error(() -> new SdkException(Code.INVALID_STATE, "Inactive application"));
+        SnapshotSynchronizer<AuthorizationSnapshot> sync =
+                synchronizers.computeIfAbsent(
+                        id, key -> new SnapshotSynchronizer<>(() -> loadSnapshot(id).flux(), 1));
+        return sync.refresh()
+                .map(
+                        values -> {
+                            AuthorizationSnapshot snapshot = values.get(0);
+                            snapshots.put(id, snapshot);
+                            syncStatus = "synchronized";
+                            return snapshot;
+                        });
     }
 
     private Mono<AuthorizationSnapshot> loadSnapshot(String id) {
-        return state(id).flatMap(current -> {
-            BusinessApplications business = new BusinessApplications(
-                    client(id, current, "oauth2").client, current.applicationId);
-            return Mono.zip(snapshotPart(business.members()), snapshotPart(business.roles()),
-                    snapshotPart(business.userRoles()), snapshotPart(business.grants()))
-                    .map(parts -> new AuthorizationSnapshot(
-                            parts.getT1(), parts.getT2(), parts.getT3(), parts.getT4()));
-        });
+        return state(id)
+                .flatMap(
+                        current -> {
+                            BusinessApplications business =
+                                    new BusinessApplications(
+                                            client(id, current, "oauth2").client,
+                                            current.applicationId);
+                            return Mono.zip(
+                                            snapshotPart(business.members()),
+                                            snapshotPart(business.roles()),
+                                            snapshotPart(business.userRoles()),
+                                            snapshotPart(business.grants()))
+                                    .map(
+                                            parts ->
+                                                    new AuthorizationSnapshot(
+                                                            parts.getT1(),
+                                                            parts.getT2(),
+                                                            parts.getT3(),
+                                                            parts.getT4()));
+                        });
     }
 
     private <T> Mono<List<T>> snapshotPart(Flux<T> source) {
-        // Read one extra row to detect truncation instead of publishing an incomplete snapshot.
-        return source.take(10001).collectList().map(values -> {
-            if (values.size() > 10000)
-                throw new IllegalStateException("Example snapshot exceeds limit");
-            return values;
-        });
+        // 多读取一条检测容量溢出，避免把截断数据发布为完整快照。
+        return source.take(10001)
+                .collectList()
+                .map(
+                        values -> {
+                            if (values.size() > 10000)
+                                throw new SdkException(
+                                        Code.LIMIT_EXCEEDED, "Example snapshot exceeds limit");
+                            return values;
+                        });
     }
 
     public static class WatchUsage {
@@ -589,8 +631,11 @@ public final class ExampleService implements AutoCloseable {
         public final List<ApiGrant> apiGrants;
         public final long synchronizedAt = System.currentTimeMillis();
 
-        AuthorizationSnapshot(List<Member> members, List<Role> roles,
-                List<UserRole> userRoles, List<ApiGrant> apiGrants) {
+        AuthorizationSnapshot(
+                List<Member> members,
+                List<Role> roles,
+                List<UserRole> userRoles,
+                List<ApiGrant> apiGrants) {
             this.members = members;
             this.roles = roles;
             this.userRoles = userRoles;
@@ -598,7 +643,8 @@ public final class ExampleService implements AutoCloseable {
         }
     }
 
-    private Mono<ExampleResponse> login(String context, ApplicationState state, ExampleOperation input) {
+    private Mono<ExampleResponse> login(
+            String context, ApplicationState state, ExampleOperation input) {
         String userToken = userToken(context, state);
         if (userToken == null)
             return Mono.just(
@@ -633,9 +679,11 @@ public final class ExampleService implements AutoCloseable {
                                 .query("code_challenge_method", "S256");
         JetLinksReactiveClient user =
                 new JetLinksReactiveClient(state.apiBaseUrl, TokenProvider.bearer(userToken));
-        Mono<String> location = platform
-                ? user.request(request, ApplicationRedirect.class).map(result -> result.location)
-                : user.request(request, String.class);
+        Mono<String> location =
+                platform
+                        ? user.request(request, ApplicationRedirect.class)
+                                .map(result -> result.location)
+                        : user.request(request, String.class);
         return location.map(
                         address -> {
                             return new ExampleResponse(
@@ -663,7 +711,7 @@ public final class ExampleService implements AutoCloseable {
                     java.security.MessageDigest.getInstance("SHA-256")
                             .digest(verifier.getBytes(StandardCharsets.US_ASCII)));
         } catch (java.security.GeneralSecurityException e) {
-            throw new IllegalStateException(e);
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot compute login challenge", e);
         }
     }
 
@@ -673,11 +721,12 @@ public final class ExampleService implements AutoCloseable {
         if (flow == null
                 || flow.expires < System.currentTimeMillis()
                 || !flow.platform && !flow.auth.state.equals(query.get("state")))
-            return Mono.error(new SecurityException("Invalid login state"));
+            return Mono.error(() -> new SdkException(Code.AUTHENTICATION, "Invalid login state"));
         if (flow.state.templateId != null
                 && (!flow.state.platformId.equals(query.get("platformId"))
                         || !flow.state.applicationId.equals(query.get("applicationId"))))
-            return Mono.error(new SecurityException("Callback identity mismatch"));
+            return Mono.error(
+                    () -> new SdkException(Code.AUTHENTICATION, "Callback identity mismatch"));
         OAuth2 oauth =
                 new OAuth2(
                         flow.state.apiBaseUrl, flow.state.accessKey, flow.state.accessSecret, true);
@@ -690,15 +739,21 @@ public final class ExampleService implements AutoCloseable {
                             JetLinksReactiveClient user =
                                     new JetLinksReactiveClient(
                                             flow.state.apiBaseUrl,
-                                            TokenProvider.bearer(
-                                                    token.accessToken));
-                            return user.request(ApiRequest.get("/authorize/context"), AuthorizationContext.class)
+                                            TokenProvider.bearer(token.accessToken));
+                            return user.request(
+                                            ApiRequest.get("/authorize/context"),
+                                            AuthorizationContext.class)
                                     .map(
                                             ctx -> {
                                                 if (!flow.state.applicationId.equals(
-                                                                ctx.application == null ? null : ctx.application.id)
-                                                        || ctx.subject == null || ctx.subject.id == null || ctx.subject.id.isEmpty())
-                                                    throw new SecurityException(
+                                                                ctx.application == null
+                                                                        ? null
+                                                                        : ctx.application.id)
+                                                        || ctx.subject == null
+                                                        || ctx.subject.id == null
+                                                        || ctx.subject.id.isEmpty())
+                                                    throw new SdkException(
+                                                            Code.AUTHENTICATION,
                                                             "Authorization context mismatch");
                                                 sessions.entrySet()
                                                         .removeIf(
@@ -707,8 +762,8 @@ public final class ExampleService implements AutoCloseable {
                                                                                 < System
                                                                                         .currentTimeMillis());
                                                 if (sessions.size() >= 128)
-                                                    throw new IllegalStateException(
-                                                            "Session limit");
+                                                    throw new SdkException(
+                                                            Code.INVALID_STATE, "Session limit");
                                                 String id = UUID.randomUUID().toString();
                                                 sessions.put(
                                                         id,
@@ -747,10 +802,10 @@ public final class ExampleService implements AutoCloseable {
 
     private Handle client(String context, ApplicationState state, String mode) {
         if (!state.active())
-            throw new IllegalArgumentException(
-                    "Application is inactive or credentials are missing");
+            throw new SdkException(
+                    Code.INVALID_ARGUMENT, "Application is inactive or credentials are missing");
         if (clients.size() >= 128 && !clients.containsKey(context + ":" + mode))
-            throw new IllegalStateException("Example client capacity reached");
+            throw new SdkException(Code.LIMIT_EXCEEDED, "Example client capacity reached");
         String fingerprint =
                 Signatures.sha256(
                         Json.bytes(
@@ -792,7 +847,7 @@ public final class ExampleService implements AutoCloseable {
                                         state.accessSecret,
                                         true);
                         auth = provider = oauth.machineTokens(null);
-                    } else throw new IllegalArgumentException("Unknown authMode");
+                    } else throw new SdkException(Code.INVALID_ARGUMENT, "Unknown authMode");
                     return new Handle(
                             fingerprint,
                             new JetLinksReactiveClient(state.apiBaseUrl, auth),
@@ -904,7 +959,7 @@ public final class ExampleService implements AutoCloseable {
                             java.net.URLDecoder.decode(kv[0], "UTF-8"),
                             kv.length == 1 ? "" : java.net.URLDecoder.decode(kv[1], "UTF-8"));
                 } catch (java.io.UnsupportedEncodingException e) {
-                    throw new IllegalStateException(e);
+                    throw new SdkException(Code.INVALID_STATE, "Cannot encode UTF-8 value", e);
                 }
             }
         return q;
@@ -960,7 +1015,7 @@ public final class ExampleService implements AutoCloseable {
                                                                             StandardCharsets
                                                                                     .UTF_8)))),
                                     StandardCharsets.UTF_8));
-                } catch (IllegalArgumentException e) {
+                } catch (SdkException e) {
                     obj.put("rawBody", "[untrusted body retained server-side]");
                 }
             }

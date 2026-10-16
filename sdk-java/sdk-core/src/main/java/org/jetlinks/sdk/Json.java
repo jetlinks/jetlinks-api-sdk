@@ -3,11 +3,14 @@ package org.jetlinks.sdk;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.*;
 
+import org.jetlinks.sdk.SdkException.Code;
+
 import java.io.IOException;
 
 /**
- * SDK JSON boundary; domain APIs expose Java models. Thread safe after
- * construction. @since 2.0
+ * SDK 共用的 JSON 编解码边界；业务接口使用 Java 模型。Mapper 完成配置后可并发使用。
+ *
+ * @since 2.0
  */
 public final class Json {
     public static final ObjectMapper MAPPER =
@@ -19,39 +22,48 @@ public final class Json {
         try {
             return MAPPER.writeValueAsBytes(value);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Invalid JSON value", e);
+            throw new SdkException(Code.SERIALIZATION, "Invalid JSON value", e);
         }
     }
 
     public static JsonNode parse(byte[] value) {
         try {
             JsonNode node = MAPPER.readTree(value);
-            if (node == null || node.isMissingNode()) throw new IllegalArgumentException("Empty JSON document");
+            if (node == null || node.isMissingNode())
+                throw new SdkException(Code.SERIALIZATION, "Empty JSON document");
             return node;
         } catch (IOException e) {
-            throw new IllegalArgumentException("Invalid JSON", e);
+            throw new SdkException(Code.SERIALIZATION, "Invalid JSON", e);
         }
     }
 
     public static JsonNode tree(Object value) {
-        return MAPPER.valueToTree(value);
+        try {
+            return MAPPER.valueToTree(value);
+        } catch (IllegalArgumentException error) {
+            throw new SdkException(Code.SERIALIZATION, "Cannot convert JSON value", error);
+        }
     }
 
     public static <T> T convert(Object value, TypeReference<T> type) {
-        return MAPPER.convertValue(value, type);
+        try {
+            return MAPPER.convertValue(value, type);
+        } catch (IllegalArgumentException error) {
+            throw new SdkException(Code.SERIALIZATION, "Cannot convert JSON value", error);
+        }
     }
 
     public static <T> T convert(Object value, Class<T> type) {
-        return MAPPER.convertValue(value, type);
+        return convert(value, TypeRef.of(type));
     }
 
     public static <T> T read(byte[] value, TypeReference<T> type) {
         try {
             T result = MAPPER.readValue(value, type);
-            if (result == null) throw new IllegalArgumentException("Empty JSON document");
+            if (result == null) throw new SdkException(Code.SERIALIZATION, "Empty JSON document");
             return result;
         } catch (IOException error) {
-            throw new IllegalArgumentException("Invalid JSON", error);
+            throw new SdkException(Code.SERIALIZATION, "Invalid JSON", error);
         }
     }
 }

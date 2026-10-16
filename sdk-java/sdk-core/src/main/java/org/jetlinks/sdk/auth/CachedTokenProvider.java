@@ -9,13 +9,20 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * One bounded token slot per identity/scope; concurrent refresh shares one subscription. No
- * business request replay. @since 2.0
+ * 每个身份和 Scope 维护一个 Token 缓存；并发刷新共用同一次订阅，不重放业务请求。
+ *
+ * @since 2.0
  */
 public final class CachedTokenProvider implements TokenProvider {
-    /** Token lifetime is provided by OAuth2 expires_in or the configured self-signed lifetime. */
+    /**
+     * Token 有效期由 OAuth2 expires_in 或本地签名的配置有效期决定。
+     *
+     * @since 2.0
+     */
     public static final class Issued {
         public final String token;
+
+        /** 绝对过期时间，单位为 Unix 毫秒。 */
         public final long expiresAt;
 
         public Issued(String token, long expiresAt) {
@@ -53,8 +60,7 @@ public final class CachedTokenProvider implements TokenProvider {
         }
         if (inFlight != null) return inFlight;
         long version = generation;
-        // cache() keeps one refresh alive across caller cancellation; invalidate prevents a late
-        // old value from being installed.
+        // cache() 使单次刷新不受调用方取消影响；代数检查阻止失效前的旧结果回写。
         inFlight =
                 Mono.defer(
                                 () -> {
@@ -79,16 +85,19 @@ public final class CachedTokenProvider implements TokenProvider {
         if (version == generation) inFlight = null;
     }
 
+    /** 递增代数并清空缓存，阻止正在执行的旧刷新回写。 */
     public synchronized void invalidate() {
         generation++;
         cached = null;
         inFlight = null;
     }
 
+    /** 实际发起加载的次数，包含失败；可供调用方接入监控。 */
     public long refreshCount() {
         return refreshes.get();
     }
 
+    /** 直接使用有效缓存的次数。 */
     public long cacheHits() {
         return hits.get();
     }

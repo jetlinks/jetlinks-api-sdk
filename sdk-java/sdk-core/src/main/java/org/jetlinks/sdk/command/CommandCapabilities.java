@@ -3,7 +3,11 @@ package org.jetlinks.sdk.command;
 import java.util.ArrayList;
 import java.util.List;
 
-/** One supported command protocol version and its actual registered command IDs. @since 2.0 */
+/**
+ * 某一命令协议版本及其实际支持的命令 ID 列表。
+ *
+ * @since 2.0
+ */
 public class CommandCapabilities {
     public static final String VERSION_1 = "1";
     public String version = VERSION_1;

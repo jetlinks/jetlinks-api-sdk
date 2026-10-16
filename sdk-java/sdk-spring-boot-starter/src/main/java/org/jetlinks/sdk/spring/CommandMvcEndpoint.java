@@ -11,8 +11,9 @@ import java.util.stream.Stream;
 import javax.servlet.http.HttpServletRequest;
 
 /**
- * Servlet async streaming adapter; closing or disconnecting cancels command output and releases its
- * budget. @since 2.0
+ * Servlet 异步流适配；关闭或断开连接会取消命令输出并释放并发名额。
+ *
+ * @since 2.0
  */
 @RestController
 public final class CommandMvcEndpoint {
@@ -54,12 +55,8 @@ public final class CommandMvcEndpoint {
                             result.close();
                         }
                     });
-        } catch (ServletBodies.TooLarge e) {
-            return ResponseEntity.status(413).build();
-        } catch (SecurityException e) {
-            return ResponseEntity.status(401).build();
-        } catch (java.io.IOException e) {
-            return ResponseEntity.status(400).build();
+        } catch (RuntimeException | java.io.IOException e) {
+            return ResponseEntity.status(EndpointErrors.commandStatus(e)).build();
         }
     }
 }

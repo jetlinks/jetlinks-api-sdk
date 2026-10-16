@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 
 import org.jetlinks.sdk.*;
+import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.notification.*;
 
 import reactor.core.publisher.Mono;
@@ -15,8 +16,9 @@ import java.util.*;
 import java.util.function.Function;
 
 /**
- * Example-only H2 durable inbox and lifecycle store. All JDBC runs off event loops; one instance
- * serializes acceptance transactions. @since 2.0
+ * 示例专用的 H2 持久化 inbox 和应用状态；JDBC 在专用线程执行，同一实例串行执行受理事务。
+ *
+ * @since 2.0
  */
 public final class ExampleStore implements NotificationStore {
     private final String url;
@@ -38,7 +40,7 @@ public final class ExampleStore implements NotificationStore {
                     "CREATE TABLE IF NOT EXISTS receipts (id VARCHAR(64) PRIMARY KEY, received"
                             + " BIGINT NOT NULL, body CLOB NOT NULL)");
         } catch (SQLException e) {
-            throw new IllegalStateException("Cannot open Example database", e);
+            throw new SdkException(Code.INVALID_STATE, "Cannot open Example database", e);
         }
     }
 
@@ -164,7 +166,8 @@ public final class ExampleStore implements NotificationStore {
                                         .put("rawBody", new String(raw, StandardCharsets.UTF_8));
                                 insertReceipt(c, n);
                             } catch (SQLException e) {
-                                throw new IllegalStateException("Cannot retain rejection", e);
+                                throw new SdkException(
+                                        Code.INVALID_STATE, "Cannot retain rejection", e);
                             }
                         })
                 .subscribeOn(Schedulers.boundedElastic())
@@ -232,7 +235,8 @@ public final class ExampleStore implements NotificationStore {
                                 }
                             }
                             if (id != null)
-                                throw new IllegalArgumentException("Unknown notification");
+                                throw new SdkException(
+                                        Code.INVALID_ARGUMENT, "Unknown notification");
                             ObjectNode result = Json.MAPPER.createObjectNode();
                             result.put("total", data.size());
                             ArrayNode slice = result.putArray("data");

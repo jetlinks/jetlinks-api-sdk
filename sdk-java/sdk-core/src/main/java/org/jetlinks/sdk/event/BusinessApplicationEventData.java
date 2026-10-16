@@ -1,6 +1,10 @@
 package org.jetlinks.sdk.event;
 
-/** Third-party delivery data; payload retains the original business fact. @since 2.0 */
+/**
+ * 第三方应用通知的数据包装；payload 保留原始业务事实。
+ *
+ * @since 2.0
+ */
 public class BusinessApplicationEventData<T> {
     public ApplicationInfo application;
     public String sourceEventId;

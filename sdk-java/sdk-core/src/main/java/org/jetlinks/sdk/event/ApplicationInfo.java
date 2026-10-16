@@ -2,7 +2,11 @@ package org.jetlinks.sdk.event;
 
 import org.jetlinks.sdk.model.Extensible;
 
-/** Public application snapshot supplied by lifecycle events; never selects routing identity. @since 2.0 */
+/**
+ * 生命周期携带的应用快照，供更新基本信息使用；不能据此选择接收应用。
+ *
+ * @since 2.0
+ */
 public class ApplicationInfo extends Extensible {
     public static final String ENABLED = "enabled";
     public static final String DISABLED = "disabled";

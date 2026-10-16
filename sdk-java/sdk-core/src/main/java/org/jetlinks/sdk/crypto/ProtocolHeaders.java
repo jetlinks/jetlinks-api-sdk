@@ -1,10 +1,14 @@
 package org.jetlinks.sdk.crypto;
 
+import org.jetlinks.sdk.SdkException;
+import org.jetlinks.sdk.SdkException.Code;
+
 import java.util.*;
 
 /**
- * Reads signature fields without coalescing duplicates. Accepts HTTP adapters retaining all header
- * values. @since 2.0
+ * 读取签名字段时拒绝重复值；HTTP 适配器需保留完整 Header 多值。
+ *
+ * @since 2.0
  */
 public final class ProtocolHeaders {
     public static final String SIGNATURE_VERSION = "X-Signature-Version";
@@ -27,26 +31,29 @@ public final class ProtocolHeaders {
         List<String> v = values.get(name);
         if (v == null) return "";
         if (v.size() != 1 || v.get(0) == null || v.get(0).isEmpty())
-            throw new SecurityException("Invalid signature header");
+            throw new SdkException(Code.AUTHENTICATION, "Invalid signature header");
         return v.get(0);
     }
 
     public String required(String name) {
         String value = optional(name);
-        if (value.isEmpty()) throw new SecurityException("Missing signature header");
+        if (value.isEmpty())
+            throw new SdkException(Code.AUTHENTICATION, "Missing signature header");
         return value;
     }
 
     public long timestamp(long now, long window) {
         String value = required(TIMESTAMP);
-        if (!value.matches("0|[1-9][0-9]{0,15}")) throw new SecurityException("Invalid timestamp");
+        if (!value.matches("0|[1-9][0-9]{0,15}"))
+            throw new SdkException(Code.AUTHENTICATION, "Invalid timestamp");
         long time = Long.parseLong(value);
-        if (Math.abs(now - time) > window) throw new SecurityException("Expired signature");
+        if (Math.abs(now - time) > window)
+            throw new SdkException(Code.AUTHENTICATION, "Expired signature");
         return time;
     }
 
     public void version() {
         if (!VERSION_1.equals(required(SIGNATURE_VERSION)))
-            throw new SecurityException("Unsupported signature version");
+            throw new SdkException(Code.AUTHENTICATION, "Unsupported signature version");
     }
 }
