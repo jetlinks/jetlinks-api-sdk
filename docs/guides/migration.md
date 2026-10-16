@@ -4,9 +4,11 @@
 
 最低运行版本为 Java 17；Starter 使用 Spring Boot 3.5，Servlet 扩展改用 `jakarta.servlet`。升级时同步调整应用 JDK 和 Spring Boot 依赖。
 
+Java 包名统一为 `org.jetlinks.sdk.client` 及其子包，例如 `org.jetlinks.sdk.client.JetLinksClient`。Maven groupId 保持 `org.jetlinks.sdk`，核心和 Starter 分别使用 `sdk-client-core`、`sdk-client-spring-boot-starter`，以区分服务端开发 SDK。Spring 配置仍使用 `jetlinks.sdk` 前缀。
+
 | 1.x | 2.0 |
 | --- | --- |
-| 根 JAR | `sdk-java/sdk-core`，坐标 `org.jetlinks.sdk:sdk-core` |
+| 根 JAR | `sdk-java/sdk-client-core`，坐标 `org.jetlinks.sdk:sdk-client-core` |
 | `WebApiClient` / `WebOAuth2Client` | `JetLinksReactiveClient`，普通线程可选 `JetLinksClient` |
 | `ClientConfig` / `OAuth2Config` | 可信 API 地址 + `TokenProvider`；OAuth2 使用 `OAuth2.machineTokens` |
 | 旧请求签名 Header | 平台当前 `at_` 本地机器 Token 或 OAuth2 Bearer |

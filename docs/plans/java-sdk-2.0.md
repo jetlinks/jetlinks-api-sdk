@@ -2,6 +2,16 @@
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
+## 客户端命名
+
+目标：与服务端开发 SDK 区分。用户已确认执行；groupId 保持 `org.jetlinks.sdk`，根父 POM 改为 `sdk-client-parent`，Java 聚合为 `sdk-client`，核心及 Starter 为 `sdk-client-core`、`sdk-client-spring-boot-starter`。示例 Maven 制品统一使用 `sdk-client-example-*` 前缀，示例聚合为 `sdk-client-examples`。
+
+影响范围为本仓库 Maven 父子引用、两个发布模块目录、Java 源码/测试的 `org.jetlinks.sdk.client` 包路径、自动配置注册、示例启动类/JAR 路径、依赖检查及说明手册。保留 `sdk-java` 语言目录、客户端类名、`jetlinks.sdk` 配置前缀和通信契约；不新增兼容包或行为改动。
+
+实施顺序：统一坐标及目录 → 迁移包名和注册资源 → 同步示例、脚本及指南 → 集中验证 Java 17 完整构建、自动配置发现、核心依赖边界、格式/残留引用和两个真实服务的本地协议闭环。主要风险是遗漏字符串形式的类名或旧产物路径；2.0 尚未发布，直接采用新命名。
+
+实施及验证：8 个 Maven 制品已统一命名，83 个 Java 源码/测试迁移到 `org.jetlinks.sdk.client` 及子包；两个发布模块目录、自动配置 imports、示例 mainClass/JAR、依赖脚本和指南同步更新。Java 17 `mvn clean verify` 通过 50 项测试，0 失败/错误/跳过；以新 JAR 启动两个服务，共通过 22 个本地模拟平台场景。发布 JAR 包路径/Java 17 字节码、自动配置发现、核心依赖边界、Java 格式、文档链接和旧引用检查通过；Java 差异仅为命名、注释和格式，共享前端未变。日志为 `/tmp/jetlinks-sdk-client-rename-build.log`、`/tmp/jetlinks-sdk-client-rename-e2e.log`、`/tmp/jetlinks-sdk-client-rename-dependencies.log`；沿用 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15)。
+
 ## Java 17 / Spring Boot 3 升级
 
 目标：整个 Java SDK、Starter 和示例统一使用 Java 17，Starter 使用 Spring Boot 3.5.16。范围为 Maven 编译/依赖、Jakarta Servlet 适配、自动配置注册、示例、CI 和接入指南；协议、业务模型、缓存、并发和共享前端不变。
@@ -41,8 +51,8 @@
 pom.xml                              # 聚合及统一版本
 sdk-java/
   pom.xml
-  sdk-core/                          # 两个客户端、认证、通知、命令及独立模型
-  sdk-spring-boot-starter/            # Spring 配置、Bean 和可选 Web 端点
+  sdk-client-core/                          # 两个客户端、认证、通知、命令及独立模型
+  sdk-client-spring-boot-starter/            # Spring 配置、Bean 和可选 Web 端点
   examples/
     example-common/                  # Java 示例流程、存储及统一接口实现
     plain-java/                      # Reactor Netty 真实服务、简短调用示例
@@ -60,12 +70,12 @@ docs/
 
 依赖规则：
 
-- `sdk-core` 生产依赖限于 JDK 17、Reactor Core/Netty、Jackson 等必要通用库；不依赖 Spring、JetLinks 平台或 hsweb。
+- `sdk-client-core` 生产依赖限于 JDK 17、Reactor Core/Netty、Jackson 等必要通用库；不依赖 Spring、JetLinks 平台或 hsweb。
 - 不引入 Lombok、Apache HttpClient 或额外 HTTP 框架；测试和示例依赖与核心隔离。
-- Java 发布坐标继续使用 `org.jetlinks.sdk`，子模块分别为 `sdk-core`、`sdk-spring-boot-starter`，初始版本 `2.0.0-SNAPSHOT`。
+- Java 发布坐标继续使用 `org.jetlinks.sdk`，子模块分别为 `sdk-client-core`、`sdk-client-spring-boot-starter`，初始版本 `2.0.0-SNAPSHOT`。
 - 统一采用 Java 17 编译和运行基线，固定 Reactor/Netty/Jackson 版本并检查 Starter 的 BOM 一致性。
 - Starter 使用 Spring Boot 3.5 / Java 17，MVC 适配 Jakarta Servlet，WebFlux 适配 Spring 6；保持单一实现。
-- `example-common` 和真实服务仅为示例模块，不作为核心传递依赖；示例数据库、Web 适配和前端构建均不进入 `sdk-core`。
+- `example-common` 和真实服务仅为示例模块，不作为核心传递依赖；示例数据库、Web 适配和前端构建均不进入 `sdk-client-core`。
 
 ## 3. 公共 API 设计约束
 
@@ -395,9 +405,9 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 | 范围 | 当前入口 |
 | --- | --- |
-| J00—J02 | 根及 `sdk-java` Maven 聚合；`sdk-core` 的两个 Client、`ApiRequest`、`Query`、`auth` |
+| J00—J02 | 根及 `sdk-java` Maven 聚合；`sdk-client-core` 的两个 Client、`ApiRequest`、`Query`、`auth` |
 | J03—J06 | `OAuth2`、`notification/*`、`BusinessApplications`、`SnapshotSynchronizer` |
-| J07—J09 | `Subscriptions`、`command/CommandService`、`sdk-spring-boot-starter` |
+| J07—J09 | `Subscriptions`、`command/CommandService`、`sdk-client-spring-boot-starter` |
 | J10 | `example-common/ExampleService`、`ExampleStore`、Netty/Boot 启动类、`examples/shared-ui`、公共 OpenAPI |
 | J11 | `.github/workflows/verify.yml`、`tools/check-dependencies.py`、`examples/smoke` |
 | 使用与迁移 | `README.md`、`docs/guides/java-sdk.md`、`examples.md`、`migration.md` |
@@ -418,7 +428,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 ### SDK 核心审查修复
 
-范围为 `sdk-core` 的生命周期、快照同步、HTTP 客户端及命令错误诊断；用户已授权复现并修复。
+范围为 `sdk-client-core` 的生命周期、快照同步、HTTP 客户端及命令错误诊断；用户已授权复现并修复。
 
 1. 将重建通知先于旧删除通知的顺序，以及同一刷新 Publisher 重订阅导致并行加载的场景纳入回归测试，先确认失败。
 2. 按创建事件隔离生命周期凭据版本；在订阅时合并快照刷新，并让任务只清理自身的在途引用。保留失败冷却、完整快照及取消语义。
@@ -443,7 +453,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 ### 公共常量与类型化模型
 
-目标：接入方通过 Java 类和常量使用平台已知契约，无需反复读取 JSON 字段。范围为 `sdk-core` 的通知、生命周期、能力声明、业务事实、订阅管理及两个客户端，并同步 Java 示例和接入指南。
+目标：接入方通过 Java 类和常量使用平台已知契约，无需反复读取 JSON 字段。范围为 `sdk-client-core` 的通知、生命周期、能力声明、业务事实、订阅管理及两个客户端，并同步 Java 示例和接入指南。
 
 1. 根据当前平台代码定义事件目录标识、事件类型及签名 Header 常量；事件类型保持字符串，允许自定义和后续扩展。
 2. 定义通知信封、生命周期数据和凭据、命令能力、分页、业务事实和订阅相关 DTO；开放业务数据使用泛型或 `Map<String, Object>`，不复制平台实体或引入平台依赖。
@@ -468,7 +478,7 @@ OAuth2 机器/授权码响应一并使用 Token DTO。示例中的通用 HTTP �
 
 实施结果：
 
-- `sdk-core/.../event` 定义事件信封、业务包装、应用快照、生命周期载荷和加密凭据。`VerifiedNotification.event` 提供固定信封，`data(Class/TypeRef)` 转换已知或自定义载荷；路由身份仍由验签 Header 决定，签名仍核对原始字节。未来自定义的 `application.*` 类型正常受理，不误作生命周期解析。
+- `sdk-client-core/.../event` 定义事件信封、业务包装、应用快照、生命周期载荷和加密凭据。`VerifiedNotification.event` 提供固定信封，`data(Class/TypeRef)` 转换已知或自定义载荷；路由身份仍由验签 Header 决定，签名仍核对原始字节。未来自定义的 `application.*` 类型正常受理，不误作生命周期解析。
 - `model`、`subscription` 定义业务事实、授权上下文、分页、订阅配置/目录/校验和投递 DTO；`BusinessApplications`、`Subscriptions`、`OAuth2` 的固定接口直接返回对应类型，新增字段在支持扩展的模型中保留。扩展配置使用 Map，未引入平台实体或新依赖。
 - 两个客户端的请求、流及分页统一支持 `Class<T>` / `TypeRef<T>`，包括嵌套泛型；分页沿用按需拉取，并尊重服务端返回的 pageSize。命令注册支持参数类和泛型，保留可信身份覆盖；默认参数及可选 metadata 使用 Map，能力声明使用 `CommandCapabilities`。
 - 公共事件类型、签名 Header、可信通道类型和已知渠道常量替换生产代码中的对应魔法值；独立协议向量继续保留文字常量作交叉校验。示例使用类型化操作请求、Token、授权上下文、快照和命令参数，公共指南与迁移说明同步更新。模拟平台目录投影及 `http-hook` 渠道 ID 对齐实际平台。

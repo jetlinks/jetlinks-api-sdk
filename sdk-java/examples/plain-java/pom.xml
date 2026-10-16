@@ -2,14 +2,14 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>org.jetlinks.sdk</groupId>
-        <artifactId>examples</artifactId>
+        <artifactId>sdk-client-examples</artifactId>
         <version>2.0.0-SNAPSHOT</version>
     </parent>
-    <artifactId>plain-java</artifactId>
+    <artifactId>sdk-client-example-java</artifactId>
     <dependencies>
         <dependency>
             <groupId>org.jetlinks.sdk</groupId>
-            <artifactId>example-common</artifactId>
+            <artifactId>sdk-client-example-common</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
@@ -30,7 +30,7 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.jetlinks.sdk.example.PlainJavaExample</mainClass>
+                                    <mainClass>org.jetlinks.sdk.client.example.PlainJavaExample</mainClass>
                                 </transformer>
                             </transformers>
                             <filters>

@@ -15,7 +15,7 @@ API 应用没有 `X-Platform-Id`；连接多个平台且应用 ID 重复时，�
 
 ## 2. 调用平台
 
-引入 `org.jetlinks.sdk:sdk-core:2.0.0-SNAPSHOT`。客户端类型在 `org.jetlinks.sdk`，认证在 `auth`，业务 DTO 在 `model`，事件在 `event`，订阅模型在 `subscription`。
+引入 `org.jetlinks.sdk:sdk-client-core:2.0.0-SNAPSHOT`。客户端类型在 `org.jetlinks.sdk.client`，认证在 `auth`，业务 DTO 在 `model`，事件在 `event`，订阅模型在 `subscription`。
 
 ```java
 // 本地生成平台支持的二进制 at_ 机器 Token，无需访问 /oauth2/token。
@@ -204,7 +204,7 @@ Authorization: Bearer <当前平台用户 Token>
 
 `SnapshotSynchronizer` 在订阅时合并在途同步，重复订阅 `refresh()` 返回值也遵循相同规则；全部读取成功后再替换快照，失败保留上次结果并冷却 1 秒。单个调用方取消不会中断共享同步。Example 演示启动/定期同步和通知触发。
 
-可运行实现见 [Example 配置与验证](examples.md#用户访问与登录验证)，核心流程在 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/example/ExampleService.java) 的 `login`、`callback`；应用可复用 SDK 实现自己的控制器和会话，不需要依赖 Example。
+可运行实现见 [Example 配置与验证](examples.md#用户访问与登录验证)，核心流程在 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/client/example/ExampleService.java) 的 `login`、`callback`；应用可复用 SDK 实现自己的控制器和会话，不需要依赖 Example。
 
 ## 5. API 订阅与第三方命令
 
@@ -232,13 +232,13 @@ public class Echo { public String message; }
 
 HTTP 适配器把 `GET /api/capabilities`、`POST /api/commands/1/{commandId}` 的最终 method/raw target/多值 Header/正文交给 `commands.handle(...)`，按结果的 status/headers/body 写出。能力来自注册表，可按应用过滤；metadata 可选，未知命令不会执行。响应成功和错误均签名，流取消后释放并发名额；写出失败或未订阅正文时也须 `Response.close()`。
 
-命令执行、流式输出或序列化失败时，默认通过 `org.jetlinks.sdk.command.CommandService` 的 JDK Logger 记录原始异常。可用 `commands.onError(failure -> ...)` 接入自己的日志/追踪，`failure` 提供平台、应用、请求及命令 ID 和 `cause`；回调须非阻塞。原始异常按服务端日志策略处理，不返回给调用方；回调抛出运行时异常不会改变签名错误或阻止名额释放。
+命令执行、流式输出或序列化失败时，默认通过 `org.jetlinks.sdk.client.command.CommandService` 的 JDK Logger 记录原始异常。可用 `commands.onError(failure -> ...)` 接入自己的日志/追踪，`failure` 提供平台、应用、请求及命令 ID 和 `cause`；回调须非阻塞。原始异常按服务端日志策略处理，不返回给调用方；回调抛出运行时异常不会改变签名错误或阻止名额释放。
 
 命令中的应用身份来自已验签 Header 和已保存实例凭据；处理器收到的保留 `applicationId/templateId` 由 SDK 填充。JSON/NDJSON 正文不聚合做签名，正文完整性依赖 HTTPS。请求 ID 用于排查，涉及写操作的业务幂等由处理器负责。
 
 ## 6. Spring Boot
 
-引入 `org.jetlinks.sdk:sdk-spring-boot-starter:2.0.0-SNAPSHOT`，并使用应用已有的 WebFlux 或 MVC Starter。
+引入 `org.jetlinks.sdk:sdk-client-spring-boot-starter:2.0.0-SNAPSHOT`，并使用应用已有的 WebFlux 或 MVC Starter。
 
 ```yaml
 jetlinks:

@@ -31,7 +31,8 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
   const fixture = await createFixture({ port: 0, exampleUrl: base, examplePort: port, configFile, directory });
   let child, passed = 0;
   async function launch() {
-    const jar = `sdk-java/examples/${kind}/target/${kind}-2.0.0-SNAPSHOT.jar`;
+    const artifact = kind === 'spring-boot' ? 'sdk-client-example-spring-boot' : 'sdk-client-example-java';
+    const jar = `sdk-java/examples/${kind}/target/${artifact}-2.0.0-SNAPSHOT.jar`;
     const args = kind === 'spring-boot' ? ['-Dexample.config=' + configFile, '-jar', jar] : ['-jar', jar, configFile];
     const log = createWriteStream(path.join(directory, 'service.log'), { flags: 'a' });
     child = spawn(java, args, { stdio: ['ignore', 'pipe', 'pipe'] });

@@ -85,7 +85,7 @@ API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（�
 2. 业务应用也可点击“从平台进入应用”：示例先设置待登录 Cookie，再以测试用户调用 `_redirect`，读取 `result.location` 导航；回调核对 platformId/applicationId 后兑换 Code。
 3. “刷新会话”展示核验后的应用、用户和权限；重放回调、修改 state 或平台入口的应用标识应被拒绝。“退出本地会话”只清理示例会话。
 
-两种按钮均由 Example 发起；未先发起而直接从外部平台打开的回调会被拒绝。“从平台进入应用”仅演示原始 `_redirect` 协议，待登录 Cookie 不能替代 state/PKCE 的 Code 绑定。真实产品建议按指南将平台到访统一为带 state/PKCE 的授权；Example 不提供平台登录页。登录代码由两个 Java 服务共用，见 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/example/ExampleService.java) 的 `login`、`callback`。`node examples/smoke/local-test.mjs` 自动验证这两种入口、PKCE、回调重放和本地退出。
+两种按钮均由 Example 发起；未先发起而直接从外部平台打开的回调会被拒绝。“从平台进入应用”仅演示原始 `_redirect` 协议，待登录 Cookie 不能替代 state/PKCE 的 Code 绑定。真实产品建议按指南将平台到访统一为带 state/PKCE 的授权；Example 不提供平台登录页。登录代码由两个 Java 服务共用，见 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/client/example/ExampleService.java) 的 `login`、`callback`。`node examples/smoke/local-test.mjs` 自动验证这两种入口、PKCE、回调重放和本地退出。
 
 ## 共用前端开发
 

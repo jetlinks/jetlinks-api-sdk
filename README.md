@@ -1,4 +1,4 @@
-# JetLinks API SDK 2.0
+# JetLinks Client SDK 2.0
 
 独立 Java 17 SDK，支持 API 应用和第三方业务应用接入。核心只依赖 Reactor Netty、Jackson 等通用库，不依赖 JetLinks 平台、hsweb 或 Spring。
 
@@ -13,12 +13,20 @@
 ```xml
 <dependency>
   <groupId>org.jetlinks.sdk</groupId>
-  <artifactId>sdk-core</artifactId>
+  <artifactId>sdk-client-core</artifactId>
   <version>2.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
 ```java
+import org.jetlinks.sdk.client.ApiRequest;
+import org.jetlinks.sdk.client.JetLinksClient;
+import org.jetlinks.sdk.client.auth.CachedTokenProvider;
+import org.jetlinks.sdk.client.auth.OAuth2;
+import org.jetlinks.sdk.client.model.AuthorizationContext;
+
+import java.time.Duration;
+
 CachedTokenProvider tokens =
     OAuth2.localTokens(accessKey, accessSecret, null, Duration.ofMinutes(2));
 try (JetLinksClient client = new JetLinksClient(apiBaseUrl, tokens)) {
@@ -27,7 +35,7 @@ try (JetLinksClient client = new JetLinksClient(apiBaseUrl, tokens)) {
 }
 ```
 
-自签 Token 的有效期须与平台配置一致，SDK 默认缓存 2 分钟。代码中的类型位于 `org.jetlinks.sdk` 和 `org.jetlinks.sdk.auth`。
+自签 Token 的有效期须与平台配置一致，SDK 默认缓存 2 分钟。代码中的类型位于 `org.jetlinks.sdk.client` 和 `org.jetlinks.sdk.client.auth`。
 
 ## 运行 Example
 
@@ -48,9 +56,9 @@ node examples/smoke/platform-fixture.mjs
 另一个终端启动 Example，再打开 http://127.0.0.1:8090：
 
 ```sh
-java -jar sdk-java/examples/plain-java/target/plain-java-2.0.0-SNAPSHOT.jar example.local.json
+java -jar sdk-java/examples/plain-java/target/sdk-client-example-java-2.0.0-SNAPSHOT.jar example.local.json
 # 或使用 Spring Boot（两者默认端口相同，选择一个运行）
-java -Dexample.config=example.local.json -jar sdk-java/examples/spring-boot/target/spring-boot-2.0.0-SNAPSHOT.jar
+java -Dexample.config=example.local.json -jar sdk-java/examples/spring-boot/target/sdk-client-example-spring-boot-2.0.0-SNAPSHOT.jar
 ```
 
 模拟首次业务应用通知：
@@ -75,8 +83,8 @@ node examples/smoke/local-test.mjs
 
 | 目录 | 内容 |
 | --- | --- |
-| `sdk-java/sdk-core` | 通用协议、双客户端及扩展点 |
-| `sdk-java/sdk-spring-boot-starter` | Boot 3.5 自动配置、Jakarta MVC/WebFlux 适配 |
+| `sdk-java/sdk-client-core` | 通用协议、双客户端及扩展点 |
+| `sdk-java/sdk-client-spring-boot-starter` | Boot 3.5 自动配置、Jakarta MVC/WebFlux 适配 |
 | `sdk-java/examples` | Java 共用流程与两种 HTTP 启动方式 |
 | `examples/shared-ui` | 所有语言 Example 共用的 Vue 前端 |
 | `examples/contract/openapi.yaml` | Example 接口契约 |
