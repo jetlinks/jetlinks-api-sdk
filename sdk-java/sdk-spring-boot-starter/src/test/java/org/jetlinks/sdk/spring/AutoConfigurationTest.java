@@ -6,6 +6,7 @@ import org.jetlinks.sdk.*;
 import org.jetlinks.sdk.crypto.Signatures;
 import org.jetlinks.sdk.notification.*;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.runner.*;
 import org.springframework.context.annotation.*;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -20,6 +21,29 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 class AutoConfigurationTest {
+    @Configuration(proxyBeanMethods = false)
+    @EnableAutoConfiguration
+    static class DiscoveryApplication {}
+
+    @Test
+    void bootDiscoversStarterWithoutExplicitImport() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(DiscoveryApplication.class)
+                .withPropertyValues(
+                        "jetlinks.sdk.base-url=http://127.0.0.1:1",
+                        "jetlinks.sdk.key=key",
+                        "jetlinks.sdk.secret=secret",
+                        "jetlinks.sdk.auth-mode=local")
+                .run(
+                        context -> {
+                            assertNull(context.getStartupFailure());
+                            assertNotNull(context.getBean(JetLinksReactiveClient.class));
+                            assertNotNull(context.getBean(JetLinksClient.class));
+                            assertEquals(
+                                    0, context.getBeansOfType(NotificationReceiver.class).size());
+                        });
+    }
+
     @Configuration(proxyBeanMethods = false)
     static class ReceiverBeans {
         @Bean

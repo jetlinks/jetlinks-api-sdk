@@ -21,7 +21,7 @@ public final class NotificationMvcEndpoint {
 
     @PostMapping("${jetlinks.sdk.notification-path:/jetlinks/events}")
     public ResponseEntity<Void> receive(
-            javax.servlet.http.HttpServletRequest request, @RequestHeader HttpHeaders headers) {
+            jakarta.servlet.http.HttpServletRequest request, @RequestHeader HttpHeaders headers) {
         try {
             receiver.receive(headers, ServletBodies.read(request)).block(Duration.ofSeconds(30));
             return ResponseEntity.noContent().build();

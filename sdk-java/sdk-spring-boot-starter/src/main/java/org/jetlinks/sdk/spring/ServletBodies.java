@@ -1,12 +1,12 @@
 package org.jetlinks.sdk.spring;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.jetlinks.sdk.SdkException;
 import org.jetlinks.sdk.SdkException.Code;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-
-import javax.servlet.http.HttpServletRequest;
 
 /**
  * 在 Spring 消息转换器聚合请求前限制 Servlet 正文大小。

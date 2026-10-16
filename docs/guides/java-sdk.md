@@ -1,5 +1,7 @@
 # Java 接入指南
 
+运行环境：Java 17+；Spring 应用使用 Spring Boot 3.5。
+
 ## 1. 准备凭据
 
 | 应用 | 首次配置 | 调用平台的凭据 |
@@ -172,4 +174,4 @@ jetlinks:
 
 自动提供两个客户端，可声明自己的 `TokenProvider` 或客户端 Bean 替换。仅在显式提供 `NotificationVerifier`、`NotificationStore` 时开放通知端点；仅在提供 `CommandService` 时开放命令端点。端点可配置 `notification-path`、`command-base-path`，默认 `/jetlinks/events`、`/api`。
 
-正式支持 Boot 2.7 / Java 8。当前 MVC 适配依赖 `javax.servlet`，Boot 3 不在本次支持范围；Boot 3 应用可直接使用 core 实现自己的 HTTP 适配。
+Starter 基于 Spring Boot 3.5 / Java 17，自动发现配置并适配 MVC 或 WebFlux；MVC 使用 `jakarta.servlet`。核心 SDK 可独立于 Spring 使用。

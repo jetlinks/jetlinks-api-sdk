@@ -4,6 +4,7 @@ import org.jetlinks.sdk.internal.BoundedBytes;
 import org.springframework.boot.*;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.server.reactive.*;
 import org.springframework.web.server.*;
 
@@ -60,13 +61,13 @@ public class SpringBootExample {
                     .flatMap(
                             body ->
                                     service.handle(
-                                            request.getMethodValue(),
+                                            request.getMethod().name(),
                                             target,
                                             request.getHeaders(),
                                             body))
                     .flatMap(
                             result -> {
-                                response.setRawStatusCode(result.status);
+                                response.setStatusCode(HttpStatusCode.valueOf(result.status));
                                 result.headers.forEach((k, v) -> response.getHeaders().set(k, v));
                                 return response.writeWith(
                                         result.body.map(

@@ -1,10 +1,27 @@
 # Java SDK 2.0 开发任务
 
-状态：已实现，按用户确认使用独立本地模拟平台验收。实际 Java 8/17 测试、两个真实 Example 服务和共用前端验证见文末；未连接生产平台、未发布 Maven 制品。
+状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
+
+## Java 17 / Spring Boot 3 升级
+
+目标：整个 Java SDK、Starter 和示例统一使用 Java 17，Starter 使用 Spring Boot 3.5.16。范围为 Maven 编译/依赖、Jakarta Servlet 适配、自动配置注册、示例、CI 和接入指南；协议、业务模型、缓存、并发和共享前端不变。
+
+1. 编译 release 改为 17；使用 Boot 3.5.16，Jackson/JUnit 对齐其 BOM，保留已对齐的 Reactor 和现有 Netty 补丁版本。
+2. Servlet API 迁移为 Jakarta，使用 Boot 3 的自动配置注解及 imports 注册，移除旧 factories 注册；更新 Spring 6 已移除的 Web API。
+3. 更新当前基线说明和 CI，仅承诺 Java 17 / Boot 3；下文历史 Java 8/Boot 2 验证保留为阶段记录。
+4. 集中验证 Java 17 完整构建、自动配置发现、MVC/WebFlux 通知和命令、核心依赖边界及两个真实 Example 的本地模拟平台闭环。
+
+升级风险集中在 Servlet 包名、自动配置发现及 Spring/Jackson 依赖一致性。SDK 2.0 尚未发布，直接采用新基线，不新增 Java 8/Boot 2 兼容层。
+
+实施结果：根 `pom.xml` 统一 release=17、Boot 3.5.16、Jackson 2.21.4、JUnit 5.12.2，Reactor BOM 2024.0.18 与 Boot 对齐，保留 Netty 4.1.138 补丁版本。`JetLinksAutoConfiguration` 使用 `@AutoConfiguration` 和现有 imports 文件，移除 factories 注册；`ReceiverConfiguration`、MVC 端点及 `ServletBodies` 使用 Jakarta Servlet，`SpringBootExample` 使用 Spring 6 的 HTTP API。CI 和接入/迁移指南同步更新。
+
+2026-10-16 验证：Temurin Java 17 `mvn clean verify` 通过 50 项测试，0 失败/错误/跳过；新增自动配置发现测试，MVC/WebFlux 通知与命令回归全部通过。core/Starter 产物 class version 为 61，Boot 示例实际依赖 Boot 3.5.16 / Spring 6.2.19。Java 17 启动两个可执行示例，通过独立 Node 模拟平台的 22 个端到端场景，包含重启恢复；核心依赖边界、Java 格式、文档链接及空白检查通过。前端代码与构建配置未变，复用此前前端验证；未连接真实平台。
+
+日志：`/tmp/jetlinks-sdk-boot3-java17.log`、`/tmp/jetlinks-sdk-boot3-e2e.log`、`/tmp/jetlinks-sdk-boot3-dependencies.log`。沿用 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15) 交付。
 
 ## 1. 目标与边界
 
-在 `jetlinks/jetlinks-api-sdk` 的 `2.0` 分支交付独立 Java 8 SDK，使接入方能够：
+在 `jetlinks/jetlinks-api-sdk` 的 `2.0` 分支交付独立 Java 17 SDK，使接入方能够：
 
 1. 使用 API 应用或第三方业务应用凭据调用平台，选择 OAuth2、本地签名机器 Token 或已有 Bearer Token。
 2. 通过同步 `JetLinksClient`、响应式 `JetLinksReactiveClient` 完成同一套平台调用。
@@ -43,11 +60,11 @@ docs/
 
 依赖规则：
 
-- `sdk-core` 生产依赖限于 JDK 8、Reactor Core/Netty、Jackson 等必要通用库；不依赖 Spring、JetLinks 平台或 hsweb。
+- `sdk-core` 生产依赖限于 JDK 17、Reactor Core/Netty、Jackson 等必要通用库；不依赖 Spring、JetLinks 平台或 hsweb。
 - 不引入 Lombok、Apache HttpClient 或额外 HTTP 框架；测试和示例依赖与核心隔离。
 - Java 发布坐标继续使用 `org.jetlinks.sdk`，子模块分别为 `sdk-core`、`sdk-spring-boot-starter`，初始版本 `2.0.0-SNAPSHOT`。
-- 第一阶段固定实际支持 Java 8 的依赖版本和维护范围，检查 Starter 的 BOM 覆盖；不得只靠 source/target=8 宣称兼容。
-- Starter 正式支持范围先采用 Spring Boot 2.7 / Java 8；Boot 3 / Java 17 做兼容性评估，若需专用适配则单独列后续任务，不增加本期模块分叉。
+- 统一采用 Java 17 编译和运行基线，固定 Reactor/Netty/Jackson 版本并检查 Starter 的 BOM 一致性。
+- Starter 使用 Spring Boot 3.5 / Java 17，MVC 适配 Jakarta Servlet，WebFlux 适配 Spring 6；保持单一实现。
 - `example-common` 和真实服务仅为示例模块，不作为核心传递依赖；示例数据库、Web 适配和前端构建均不进入 `sdk-core`。
 
 ## 3. 公共 API 设计约束
@@ -58,7 +75,7 @@ docs/
 | 入口 | 职责 |
 | --- | --- |
 | `JetLinksReactiveClient` | 通用请求、泛型 JSON、分页、`Mono<T>` 单结果和 `Flux<T>` 流式结果 |
-| `JetLinksClient` | 同等单结果和分页调用；流式结果提供可关闭的 Java 8 `Stream<T>` |
+| `JetLinksClient` | 同等单结果和分页调用；流式结果提供可关闭的 `Stream<T>` |
 | 客户端认证配置 | OAuth2 client_credentials、本地签名机器 Token、外部 Bearer；授权码兑换作为明确操作 |
 | 通知接收接口 | 原始请求验签，返回可信身份、事件及可持久受理的结果 |
 | 命令注册接口 | 根据可信应用身份返回能力，绑定命令 ID、参数和 Mono/Flux 处理器 |
@@ -89,7 +106,7 @@ examples/shared-ui（唯一前端）
 - 同一份前端产物由任意语言 Example 服务托管。开发时通过 Vite 代理 `/example-api`，构建时复用同一产物路径或打包步骤；语言目录不复制前端源码，也不按语言编写页面分支。
 - 各服务实现 `examples/contract/openapi.yaml`，统一字段、分页、错误、会话和可用功能说明。前端只配置 Example 服务地址，不直接访问平台或持有平台 Token/Secret。
 - Java 的两种服务复用 `example-common` 中的调用流程、状态归并、持久受理及接口逻辑，只分别适配 HTTP 启动、原始请求和资源释放；不在 Example 重写 SDK 签名、缓存或认证。
-- Java 真实示例采用仅属于 Example 的 H2 文件数据库，通过 J05 扩展点原子保存应用绑定、凭据状态和 inbox；WebFlux/Netty 中的 JDBC 在阻塞专用线程执行，避免阻塞事件循环。数据库版本须兼容 Java 8，数据文件不提交。
+- Java 真实示例采用仅属于 Example 的 H2 文件数据库，通过 J05 扩展点原子保存应用绑定、凭据状态和 inbox；WebFlux/Netty 中的 JDBC 在阻塞专用线程执行，避免阻塞事件循环。数据库版本须兼容 Java 17，数据文件不提交。
 - 正常启动即连接真实平台；未配置或平台不可达时明确展示状态。离线替身仅用于自动化测试，不用模拟结果冒充真实联调成功。
 
 统一前端围绕“选择应用→执行接入操作→查看结果/通知”组织，至少覆盖：
@@ -112,7 +129,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 - 状态：`2.0` 分支及独立 Maven 多模块已完成；无前置任务。
 - 将旧 `src` 和构建调整为第 2 节结构，更新 Maven 聚合、发布配置及忽略规则；旧协议行为经甄别后迁移，不原样搬入平台依赖。
-- 固定 Java 8 兼容的 Reactor/Netty/Jackson 版本；添加编译 API 兼容检查、依赖边界检查和独立构建入口。
+- 固定 Java 17 兼容且与 Boot 3.5 对齐的 Reactor/Netty/Jackson 版本；添加编译 API 兼容检查、依赖边界检查和独立构建入口。
 - 验收：仅拉取本仓库即可构建；核心依赖树无 Spring、平台或 hsweb，核心及公开 API 不引用这些类型；语言空目录通过 README 纳入版本管理。
 
 ### J01：HTTP、独立模型和双客户端
@@ -200,7 +217,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 - MVC/WebFlux 按现有应用类型条件装配，依赖可选，不强制调用方切换 Web 栈或使用独立端口；两个适配器复用同一验签和受理逻辑。
 - 通知端点在明确配置受信密钥和受理实现后才启用；命令端点按需启用。WebFlux 不允许执行阻塞业务处理器，MVC 示例也不在响应式事件线程阻塞。
 - 端点保留验签需要的 raw body、多值 Header 和原始 URI；超时、容量、并发、端点路径均有合理默认值及配置说明。
-- 验收：纯客户端、MVC、WebFlux 三种启动场景通过；未配置时不会暴露无校验端点；只引入 core 可完全脱离 Spring 运行；Boot 3 评估结果写回本计划。
+- 验收：纯客户端、MVC、WebFlux 三种启动场景通过；未配置时不会暴露无校验端点；只引入 core 可完全脱离 Spring 运行；Boot 3 自动配置发现及 Jakarta 适配验证通过。
 
 ### J10：真实 Example 服务、统一前端与接入指南
 
@@ -261,10 +278,10 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 ### J11：阶段验收、CI 与交付
 
 - 前置：J00—J10。
-- 建立 Java 8 与较新 JDK 构建、核心依赖检查、Starter 场景、前端检查及 Example 服务公共验收的 CI；设置可复现的构建/验证命令和发布说明。
+- 建立 Java 17 构建、核心依赖检查、Starter 场景、前端检查及 Example 服务公共验收的 CI；设置可复现的构建/验证命令和发布说明。
 - 固定平台提交与协议向量来源，进行真实 HTTP 联调；共享一套测试向量不等于仅测试 SDK 自身签名再验签。
 - 集中执行第 7 节矩阵，修复后只重跑受影响阶段，最终整理版本兼容、剩余风险及平台部署前提。
-- 验收：从干净仓库执行构建/测试通过，Java 8 实际运行通过；完整示例与当前平台闭环通过；无敏感测试数据，文档、产物和发布坐标一致。
+- 验收：从干净仓库执行构建/测试通过，Java 17 实际运行通过；完整示例与当前平台闭环通过；无敏感测试数据，文档、产物和发布坐标一致。
 - 完成后按用户授权提交/推送 `2.0` 分支并提交 PR；发布到 Maven 仓库单独按发布权限执行，不将计划确认视为生产发布授权。
 
 ## 5. 当前平台契约核对清单
@@ -316,7 +333,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 | 阶段 | 任务 | 可交付结果 | 集中验证 |
 | --- | --- | --- | --- |
-| A | J00—J03 | 无 Spring 的双客户端、认证、授权登录 | Java 8、依赖边界、HTTP/认证/缓存并发及协议向量 |
+| A | J00—J03 | 无 Spring 的双客户端、认证、授权登录 | Java 17、依赖边界、HTTP/认证/缓存并发及协议向量 |
 | B | J04—J06 | 统一通知、业务凭据、多区域及授权事实读取 | 真实通知、持久受理失败、乱序/重建及分页同步 |
 | C | J07—J08 | API 订阅闭环及第三方命令服务 | 订阅投递、双向签名、NDJSON、取消及限流 |
 | D | J09—J11 | Starter、两种真实服务、统一前端、指南及 PR | 公共契约、浏览器流程、持久恢复、全流程联调及干净构建 |
@@ -327,7 +344,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 | 维度 | 必须验证 |
 | --- | --- |
-| 独立性 | 核心无 Spring/JetLinks/hsweb 依赖及公开类型泄漏；Java 8 编译和实际运行 |
+| 独立性 | 核心无 Spring/JetLinks/hsweb 依赖及公开类型泄漏；Java 17 编译和实际运行 |
 | 双客户端 | 相同请求结果、泛型/分页/错误；超时、关闭、自有/外部资源和禁止事件线程阻塞 |
 | 认证 | API/业务 × OAuth2/自签；Basic/Post；Scope 三态；外部用户 Token；无自动写重放 |
 | 缓存与并发 | Token 单次刷新、失败恢复、容量、应用/地址隔离、同步合并、轮换失效及名额释放 |
@@ -349,7 +366,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 ## 8. 风险与明确取舍
 
 1. 平台基线为当前统一契约，包含 platformId Header 和 credential.synced；旧通知签名不做自动回退。联调前确认相应平台版本已部署。
-2. Java 8 对 Reactor/Netty 版本有约束；固定版本后核对维护状态和 Boot 依赖覆盖，不能升级到不支持 Java 8 的版本。
+2. Java 17 / Boot 3.5 升级需核对 Reactor、Netty、Jackson 依赖管理及 Jakarta Servlet 一致性，避免消费方出现版本冲突。
 3. 多区域身份仍是平台现有二元组；两个真实独立平台若使用相同 platformId/applicationId，SDK 无法靠 URL 推断其区别，需平台模板配置正确命名空间。
 4. 生产可靠性依赖接入方原子持久受理；内存缓存只能提供进程内去重。真实 Example 使用 H2 演示持久闭环，但 Starter 和 core 不为业务强制选择数据库。
 5. 持续流、同步 Stream 和业务处理器必须在关闭/取消时释放资源；WebFlux 处理器只能使用非阻塞实现。
@@ -357,6 +374,8 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 7. 1.x 到 2.0 是主版本 API 调整；通过迁移说明解决，不把旧框架依赖重新引回 core。
 
 ## 9. 事实来源与回填
+
+以下为 Java 17 / Boot 3 升级前的阶段记录；当前支持范围及本次验证结果以文首升级说明为准。
 
 仓库基线：`42ac2a5fc9ba331048658e52f5e122215091b907`（旧单模块 SDK）。
 
@@ -393,7 +412,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 - 使用同一前端检查调用、通知筛选/脱敏详情、授权回调和本地会话；浏览器日志检查无告警/错误。Browser CLI 被本机 Chrome 沙箱限制后，改用内置浏览器验证。
 - `python3 tools/check-dependencies.py` 通过：核心运行依赖无 Spring、hsweb、平台包。POM XML、文档相对链接和 `git diff --check` 通过。
 
-本轮按用户要求使用本地模拟平台；真实平台部署后的网络、权限和实际事件源按 `docs/guides/examples.md` 验收，不能把本轮结果视为生产联调。Boot 正式支持 2.7/Java 8；Boot 3 的 javax/Jakarta 适配不在本期范围。
+本轮按用户要求使用本地模拟平台；真实平台部署后的网络、权限和实际事件源按 `docs/guides/examples.md` 验收，不能把本轮结果视为生产联调。该阶段采用 Boot 2.7 / Java 8；现已由文首的 Java 17 / Boot 3.5 基线替代。
 
 交付：`2.0` → `master`，[PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15)。SDK 实现提交为 `0b84fb0336fa8abb08e3014e8d4debb80effa73c`；Maven Central 尚未发布。
 

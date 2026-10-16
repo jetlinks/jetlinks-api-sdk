@@ -2,6 +2,8 @@
 
 2.0 是新的主版本，不保留旧 `ApiClient`、`WebApiClient` 或 hsweb Query DSL 的源码兼容层。
 
+最低运行版本为 Java 17；Starter 使用 Spring Boot 3.5，Servlet 扩展改用 `jakarta.servlet`。升级时同步调整应用 JDK 和 Spring Boot 依赖。
+
 | 1.x | 2.0 |
 | --- | --- |
 | 根 JAR | `sdk-java/sdk-core`，坐标 `org.jetlinks.sdk:sdk-core` |

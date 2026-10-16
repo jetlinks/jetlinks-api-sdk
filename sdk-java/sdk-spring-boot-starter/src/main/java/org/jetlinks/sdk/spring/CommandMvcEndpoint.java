@@ -1,5 +1,7 @@
 package org.jetlinks.sdk.spring;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.jetlinks.sdk.command.CommandService;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -7,8 +9,6 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.time.Duration;
 import java.util.stream.Stream;
-
-import javax.servlet.http.HttpServletRequest;
 
 /**
  * Servlet 异步流适配；关闭或断开连接会取消命令输出并释放并发名额。

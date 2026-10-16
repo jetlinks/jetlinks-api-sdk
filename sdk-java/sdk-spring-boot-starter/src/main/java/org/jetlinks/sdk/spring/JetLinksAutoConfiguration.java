@@ -3,6 +3,7 @@ package org.jetlinks.sdk.spring;
 import org.jetlinks.sdk.*;
 import org.jetlinks.sdk.SdkException.Code;
 import org.jetlinks.sdk.auth.*;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;
@@ -12,7 +13,7 @@ import org.springframework.context.annotation.*;
  *
  * @since 2.0
  */
-@Configuration(proxyBeanMethods = false)
+@AutoConfiguration
 @EnableConfigurationProperties(JetLinksProperties.class)
 @Import(ReceiverConfiguration.class)
 public class JetLinksAutoConfiguration {

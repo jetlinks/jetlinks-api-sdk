@@ -66,7 +66,7 @@ public class ReceiverConfiguration {
                                     .flatMap(
                                             bytes ->
                                                     commands.handle(
-                                                            request.methodName(),
+                                                            request.method().name(),
                                                             request.uri().getRawPath()
                                                                     + (request.uri().getRawQuery()
                                                                                     == null
@@ -107,7 +107,7 @@ public class ReceiverConfiguration {
 
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-    @ConditionalOnClass(name = "javax.servlet.http.HttpServletRequest")
+    @ConditionalOnClass(name = "jakarta.servlet.http.HttpServletRequest")
     static class ServletEndpoints {
         @Bean
         @ConditionalOnBean({NotificationVerifier.class, NotificationStore.class})

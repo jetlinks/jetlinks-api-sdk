@@ -4,7 +4,7 @@
 
 ## 本地完整验证
 
-从根目录执行（JDK 8+、Maven 3.6.3+、Node.js 20+）：
+从根目录执行（JDK 17+、Maven 3.6.3+、Node.js 20+）：
 
 ```sh
 npm --prefix examples/shared-ui ci

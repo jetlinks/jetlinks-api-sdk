@@ -1,6 +1,6 @@
 # JetLinks API SDK 2.0
 
-独立 Java 8 SDK，支持 API 应用和第三方业务应用接入。核心只依赖 Reactor Netty、Jackson 等通用库，不依赖 JetLinks 平台、hsweb 或 Spring。
+独立 Java 17 SDK，支持 API 应用和第三方业务应用接入。核心只依赖 Reactor Netty、Jackson 等通用库，不依赖 JetLinks 平台、hsweb 或 Spring。
 
 - 同步 `JetLinksClient`、响应式 `JetLinksReactiveClient` 共用协议与认证。
 - OAuth2、本地签名机器 Token、已有 Bearer Token。
@@ -31,7 +31,7 @@ try (JetLinksClient client = new JetLinksClient(apiBaseUrl, tokens)) {
 
 ## 运行 Example
 
-需要 JDK 8+、Maven 3.6.3+、Node.js 20+。从仓库根目录执行：
+需要 JDK 17+、Maven 3.6.3+、Node.js 20+。从仓库根目录执行：
 
 ```sh
 npm --prefix examples/shared-ui ci
@@ -76,7 +76,7 @@ node examples/smoke/local-test.mjs
 | 目录 | 内容 |
 | --- | --- |
 | `sdk-java/sdk-core` | 通用协议、双客户端及扩展点 |
-| `sdk-java/sdk-spring-boot-starter` | Boot 2.7 自动配置、MVC/WebFlux 适配 |
+| `sdk-java/sdk-spring-boot-starter` | Boot 3.5 自动配置、Jakarta MVC/WebFlux 适配 |
 | `sdk-java/examples` | Java 共用流程与两种 HTTP 启动方式 |
 | `examples/shared-ui` | 所有语言 Example 共用的 Vue 前端 |
 | `examples/contract/openapi.yaml` | Example 接口契约 |
