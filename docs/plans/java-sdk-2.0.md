@@ -395,7 +395,7 @@ J00—J10 已完成实现与本地验收。核心协议、双客户端、通知�
 
 本轮按用户要求使用本地模拟平台；真实平台部署后的网络、权限和实际事件源按 `docs/guides/examples.md` 验收，不能把本轮结果视为生产联调。Boot 正式支持 2.7/Java 8；Boot 3 的 javax/Jakarta 适配不在本期范围。
 
-Git：本地 `2.0`，SDK commit/PR 尚未创建；Maven Central 尚未发布。
+交付：`2.0` → `master`，[PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15)。SDK 实现提交为 `0b84fb0336fa8abb08e3014e8d4debb80effa73c`；Maven Central 尚未发布。
 
 ### SDK 核心审查修复
 
@@ -420,7 +420,7 @@ Git：本地 `2.0`，SDK commit/PR 尚未创建；Maven Central 尚未发布。
 
 `JAVA_HOME=<Zulu 8> node examples/smoke/local-test.mjs` 对纯 Java、Spring Boot 两个真实服务分别通过 11 个场景，共 22 项；使用独立 Node 模拟平台，包含重启恢复。核心依赖边界、文档链接、源码空白及 `git diff --check` 通过；前端未变，复用此前检查证据。
 
-本轮日志：`/tmp/jetlinks-sdk-core-red.log`、`/tmp/jetlinks-sdk-core-fix-java8.log`、`/tmp/jetlinks-sdk-core-fix-java17.log`、`/tmp/jetlinks-sdk-core-fix-e2e.log`、`/tmp/jetlinks-sdk-core-fix-dependencies.log`。SDK 改动仍在本地 `2.0` 工作区。
+本轮日志：`/tmp/jetlinks-sdk-core-red.log`、`/tmp/jetlinks-sdk-core-fix-java8.log`、`/tmp/jetlinks-sdk-core-fix-java17.log`、`/tmp/jetlinks-sdk-core-fix-e2e.log`、`/tmp/jetlinks-sdk-core-fix-dependencies.log`。相关修复纳入 SDK 2.0 的同一 PR。
 
 ### 公共常量与类型化模型
 
@@ -434,7 +434,7 @@ Git：本地 `2.0`，SDK commit/PR 尚未创建；Maven Central 尚未发布。
 
 本项属于公共 API 整理，用户已确认按此范围实施。SDK 2.0 尚未发布，直接统一固定业务接口，不保留重复的 JSON 业务 API；底层通用请求保留原有 JSON 入口。不扩展平台业务能力、前端交互或语言范围。风险重点为真实字段/集合结构、泛型反序列化及原始签名字节不被重写。
 
-拟提供的主要类型：
+主要公共类型：
 
 | 边界 | 类型与调用形式 |
 | --- | --- |
@@ -458,4 +458,4 @@ OAuth2 机器/授权码响应一并使用 Token DTO。示例中的通用 HTTP �
 
 Java 8 启动纯 Java、Spring Boot 两个可执行服务，通过独立 Node 模拟平台的 22 个端到端场景，包含两类应用、多区域、签名通知、登录、订阅、分页、命令、取消及重启恢复。核心依赖检查、Node 语法、文档链接、空白及 `git diff --check` 通过。共享前端源码未变，复用已有 typecheck/lint/build 证据；真实平台环境仍未联调。
 
-日志：`/tmp/jetlinks-sdk-model-java8.log`、`/tmp/jetlinks-sdk-model-java17.log`、`/tmp/jetlinks-sdk-model-e2e.log`、`/tmp/jetlinks-sdk-model-dependencies.log`。SDK 仍在本地 `2.0` 工作区，尚未提交或发布。
+日志：`/tmp/jetlinks-sdk-model-java8.log`、`/tmp/jetlinks-sdk-model-java17.log`、`/tmp/jetlinks-sdk-model-e2e.log`、`/tmp/jetlinks-sdk-model-dependencies.log`。实现已提交至 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15) 供评审；交付时仅回填本文件，不重复执行已覆盖当前实现的验证，Maven 包尚未发布。
