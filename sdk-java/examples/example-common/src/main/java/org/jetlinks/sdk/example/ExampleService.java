@@ -661,6 +661,7 @@ public final class ExampleService implements AutoCloseable {
                 config.publicBaseUrl.replaceAll("/+$", "") + "/example-api/login/callback";
         OAuth2.Authorization auth = oauth.authorization(redirect, null);
         String cookie = UUID.randomUUID().toString();
+        // 原始平台入口用于协议演示；生产登录建议统一走带 state/PKCE 的授权。
         boolean platform = input.entry.equals("platform");
         PendingLogin flow = new PendingLogin(context, state.copy(), auth, platform);
         pending.put(cookie, flow);
@@ -722,7 +723,10 @@ public final class ExampleService implements AutoCloseable {
                 || flow.expires < System.currentTimeMillis()
                 || !flow.platform && !flow.auth.state.equals(query.get("state")))
             return Mono.error(() -> new SdkException(Code.AUTHENTICATION, "Invalid login state"));
-        if (flow.state.templateId != null
+        // 标准授权只保证 code/state，应用身份由已绑定浏览器的待登录记录确定。
+        // 平台 _redirect 才追加来源和应用参数，须与本次发起记录一致。
+        if (flow.platform
+                && flow.state.templateId != null
                 && (!flow.state.platformId.equals(query.get("platformId"))
                         || !flow.state.applicationId.equals(query.get("applicationId"))))
             return Mono.error(

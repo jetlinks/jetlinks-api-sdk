@@ -75,13 +75,13 @@ export async function createFixture({ port = 19090, exampleUrl = 'http://127.0.0
     check(entry && entry.region === app.region && entry.revision === app.revision, 'Unknown or obsolete token');
     return entry;
   }
-  function issueCode(app, redirect, state, challenge) {
+  function issueCode(app, redirect, state, challenge, platform) {
     const code = tokenId();
     codes.set(code, { region: app.region, redirect, challenge });
     const url = new URL(redirect);
     url.searchParams.set('code', code);
     if (state) url.searchParams.set('state', state);
-    if (!app.region.startsWith('api')) {
+    if (platform) {
       url.searchParams.set('platformId', app.region); url.searchParams.set('applicationId', app.id);
     }
     return url.toString();
@@ -166,7 +166,7 @@ export async function createFixture({ port = 19090, exampleUrl = 'http://127.0.0
         check(identity.kind === 'platform-user', 'Platform user required');
         const platform = route.endsWith('/_redirect'), redirect = platform ? exampleUrl + '/example-api/login/callback' : url.searchParams.get('redirect_uri');
         if (!platform) check(url.searchParams.get('client_id') === app.key && url.searchParams.get('code_challenge_method') === 'S256', 'Invalid authorization request');
-        const location = issueCode(app, redirect, platform ? null : url.searchParams.get('state'), platform ? null : url.searchParams.get('code_challenge'));
+        const location = issueCode(app, redirect, platform ? null : url.searchParams.get('state'), platform ? null : url.searchParams.get('code_challenge'), platform);
         return json(res, platform ? { location } : location);
       }
       if (route === '/authorize/context') return json(res, { application: { id: app.id }, subject: { id: identity.kind === 'user' ? 'user-1' : app.id, type: identity.kind === 'user' ? 'user' : 'application' }, region: app.region });

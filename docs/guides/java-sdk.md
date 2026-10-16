@@ -111,19 +111,100 @@ if (EventTypes.APPLICATION_CREDENTIAL_SYNCED.equals(notice.event.type)) {
 
 ## 4. 用户登录与授权事实
 
+### 4.1 接入前准备
+
+用户访问流程已包含在 SDK 和两个 Example 中：SDK 负责生成 state/PKCE、兑换授权码和请求授权上下文；应用负责平台登录入口、浏览器跳转、本地用户映射和会话。
+
+1. 在第三方模板配置 `configuration.redirectUri`，例如 `https://partner.example.com/jetlinks/callback`；生产使用 HTTPS，建议使用不带 fragment 的服务端回调地址。
+2. 配置通知并创建业务应用实例，等凭据通知验签、解密、持久化完成。保存 `(platformId, applicationId)`、`apiBaseUrl`、Key/Secret；应用须已启用，访问用户须具备该应用的成员资格。
+3. 实现登录发起和回调接口，以及本地会话存储。多实例部署时共享待登录记录和会话，待登录记录须有短有效期并支持原子消费。
+
+两种入口最终都使用用户授权码；应用机器 Token 不能代替平台用户身份：
+
+| 入口 | 平台请求（须携带当前已登录用户身份） | 成功响应 |
+| --- | --- | --- |
+| 平台应用列表进入 | `GET /business-application/{applicationId}/_redirect` | `result.location` 是第三方回调地址，含 `code/platformId/applicationId` |
+| 第三方发起登录 | `GET /oauth2/authorize`，参数由 `OAuth2.authorization` 生成 | `result` 是第三方回调地址，含 `code/state` |
+
+两个接口返回 JSON，调用方读取地址后让浏览器导航，不是直接返回 HTTP 302。SDK 不提供平台登录页；未登录时由接入方对接平台已有登录页面，再由平台侧已登录页面或服务完成上述请求。不要直接把不带用户身份的授权 URL 当成通用登录页，也不要在应用中共用固定的用户 Token。
+
+### 4.2 第三方发起登录（state + PKCE）
+
+流程：浏览器进入应用登录接口 → 保存待登录记录 → 平台用户完成授权 → 浏览器回调 → 兑换 Code → 核验用户 → 建立应用会话。
+
 ```java
+// application 是第 3 节通知建立的可信 ApplicationState。
+OAuth2 oauth = new OAuth2(application.apiBaseUrl,
+    application.accessKey, application.accessSecret, true);
+String actualRedirectUri = "https://partner.example.com/jetlinks/callback";
 OAuth2.Authorization pending = oauth.authorization(actualRedirectUri, null);
-// 在浏览器会话保存 pending.state/verifier/redirectUri；平台授权接口需已登录用户身份。
-// GET pending.url 的平台响应为 JSON result 中的地址，应用再让浏览器跳转。
-// 回调时先原子消费 state，再用原始 redirectUri 换 Code，不能用带 code 的回调 URL。
-Mono<OAuth2Token> token = oauth.exchange(code, pending.redirectUri, pending.verifier);
+// 服务端保存 application 的复合身份及 pending，绑定当前浏览器会话。
+// 将 pending.url 交给平台已登录入口请求；verifier 只保存在服务端。
+// 得到 {"result":"https://partner.example.com/jetlinks/callback?code=...&state=..."}
+// 后，由浏览器导航到 result。
 ```
 
-用返回的用户 Token 查询 `/authorize/context`，核对应用及主体后建立本地会话。回调中的平台/应用标识只能定位已可信绑定的应用记录；不能接受回调传入的 API 地址/Secret。Code 不缓存、不自动重试；平台不发 Refresh Token，过期后重新登录。平台 `_redirect` 入口不自动生成 state/PKCE，仍需由应用关联发起会话，不能仅凭 Code 参数建立会话。
+回调先核对当前浏览器对应的待登录记录、有效期和 `state`，再原子消费记录；不能只根据 query 的 state 查找记录而忽略浏览器绑定。应用身份从待登录记录取得，标准授权回调不保证附加 `platformId/applicationId`。业务应用实际回调可选择模板注册地址同源的 path/query，不能带 fragment；兑换须使用申请时保存的完整 `redirectUri`。
+
+```java
+// 已完成 state/浏览器绑定核验；application、pending 均从服务端记录恢复。
+Mono<AuthorizationContext> authenticated = oauth
+    .exchange(code, pending.redirectUri, pending.verifier)
+    .flatMap(token -> {
+        JetLinksReactiveClient user = new JetLinksReactiveClient(
+            application.apiBaseUrl, TokenProvider.bearer(token.accessToken));
+        return user.request(ApiRequest.get("/authorize/context"), AuthorizationContext.class)
+            .map(context -> {
+                if (context.application == null
+                    || !application.applicationId.equals(context.application.id)
+                    || context.subject == null || context.subject.id == null
+                    || context.subject.id.isEmpty()) {
+                    throw new SdkException(SdkException.Code.AUTHENTICATION,
+                        "Authorization context mismatch");
+                }
+                // 按 platformId + applicationId + subject.id 映射本地用户。
+                // 创建本地会话；需继续调用用户 API 时，将 token 安全保存在服务端。
+                return context;
+            })
+            .doFinally(signal -> user.close());
+    });
+// 在应用服务停止时关闭复用的 oauth；按请求创建时在链路结束后关闭。
+```
+
+普通线程也可用 `JetLinksClient` 查询同一上下文；WebFlux/Netty 回调中保持响应式链路。`subject.name` 是显示名，不能作为唯一用户标识；需用户名时用同一用户 Token 查询 `/user/detail`，核对返回的用户 ID 后读取 username。`extensions.tenant` 为可选扩展，不能用回调参数指定租户归属。
+
+### 4.3 从平台进入第三方应用
+
+平台页面以当前用户身份获取访问地址：
+
+```http
+GET /business-application/partner-app-001/_redirect
+Authorization: Bearer <当前平台用户 Token>
+```
+
+```json
+{
+  "result": {
+    "location": "https://partner.example.com/jetlinks/callback?platformId=east&applicationId=partner-app-001&code=..."
+  }
+}
+```
+
+平台页面导航到 `result.location`。query 的 `(platformId, applicationId)` 只能定位已可信绑定的记录。若双方已有能把本次 Code 与当前浏览器可靠绑定的机制，可从该记录读取地址和凭据，用 `oauth.exchange(code, registeredRedirectUri, null)` 兑换，再按 4.2 查询上下文并建立会话。`registeredRedirectUri` 是模板原始 `configuration.redirectUri`，保留原有 query，不包含平台本次追加的参数。
+
+`_redirect` 不自动生成 state/PKCE，单有待登录 Cookie 也不能证明 Code 属于本次浏览器授权。建议将首次平台到访作为登录入口，按 4.2 统一重新发起带 state/PKCE 的用户授权；不能仅凭收到的 Code 就建立浏览器会话。模板附加的 userId/username 只作业务提示，身份以兑换后的上下文为准。回调参数不能提供或覆盖 API 地址、Secret 和用户身份。
+
+### 4.4 会话、后续请求与授权同步
+
+给浏览器设置不透明的本地会话 Cookie（生产使用 `HttpOnly; Secure; SameSite=Lax`），Token/Secret 留在服务端，登录完成后跳转到不含 Code 的页面。用户请求使用该用户的 Token，后台任务使用第 2 节机器 Token，缓存按应用和用户隔离。Code 只兑换一次，不缓存、不自动重试；超时且结果不明时重新授权。平台不发 Refresh Token，Token 过期或返回 401 后重新登录；403 按当前权限处理。
+
+本地会话期限由应用管理，建议不超过用户 Token 的有效期。本地退出清理自己的会话和服务端 Token，不代表退出平台；成员/权限回收不会自动删除应用会话，应结合通知刷新授权并及时失效相关会话。
 
 `BusinessApplications` 的成员、角色、关系、API 授权、角色权限和菜单分别返回 `Member`、`Role`、`UserRole`、`ApiGrant`、`RoleAuthorization`、`RoleMenu` 流；`assets(role)` 返回 `List<AssetAccesses>`。关系通知只触发重读完整事实，不当作权限快照；SDK 不计算平台有效权限。
 
 `SnapshotSynchronizer` 在订阅时合并在途同步，重复订阅 `refresh()` 返回值也遵循相同规则；全部读取成功后再替换快照，失败保留上次结果并冷却 1 秒。单个调用方取消不会中断共享同步。Example 演示启动/定期同步和通知触发。
+
+可运行实现见 [Example 配置与验证](examples.md#用户访问与登录验证)，核心流程在 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/example/ExampleService.java) 的 `login`、`callback`；应用可复用 SDK 实现自己的控制器和会话，不需要依赖 Example。
 
 ## 5. API 订阅与第三方命令
 

@@ -118,9 +118,14 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       assert.equal(forbidden.status, 403); // Preserve the platform permission rejection.
     });
     await scenario('PKCE login, platform entry, one-use state/code, local session', async () => {
-      for (const [context, entry] of [['api', 'application'], [east, 'application'], [east, 'platform']]) {
+      for (const [context, entry] of [['api', 'third-party'], [east, 'third-party'], [east, 'platform']]) {
         const response = await fetch(base + '/example-api/applications/' + context + '/login', { method: 'POST', body: JSON.stringify({ entry }) });
         assert.equal(response.status, 200); const cookie = response.headers.get('set-cookie').split(';')[0], login = await response.json();
+        const query = new URL(login.url).searchParams;
+        assert.equal(query.has('platformId'), entry === 'platform');
+        assert.equal(query.has('applicationId'), entry === 'platform');
+        assert.equal(query.has('state'), entry !== 'platform');
+        assert.equal((await fetch(login.url, { redirect: 'manual' })).status, 401);
         const callback = await fetch(login.url, { headers: { Cookie: cookie }, redirect: 'manual' });
         assert.equal(callback.status, 302);
         const sessionCookie = callback.headers.get('set-cookie').split(';')[0];
@@ -134,6 +139,12 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       const start = await fetch(base + '/example-api/applications/' + east + '/login', { method: 'POST', body: '{}' });
       const cookie = start.headers.get('set-cookie').split(';')[0], url = new URL((await start.json()).url); url.searchParams.set('state', 'tampered');
       assert.equal((await fetch(url, { headers: { Cookie: cookie } })).status, 401);
+      for (const field of ['platformId', 'applicationId']) {
+        const response = await fetch(base + '/example-api/applications/' + east + '/login', { method: 'POST', body: JSON.stringify({ entry: 'platform' }) });
+        const cookie = response.headers.get('set-cookie').split(';')[0], url = new URL((await response.json()).url);
+        url.searchParams.set(field, 'tampered');
+        assert.equal((await fetch(url, { headers: { Cookie: cookie }, redirect: 'manual' })).status, 401);
+      }
     });
     await scenario('authorization facts pagination, synchronization, role queries', async () => {
       const snapshot = await operation(east, 'authorization', {});

@@ -75,6 +75,18 @@ API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（�
 
 通知详情展示脱敏原文、可信身份、重复和受理状态；原始验签字节只存服务器。H2 文件保存凭据和原始通知，应限制文件权限。Example 的管理界面只用于本地/受控联调，不自带生产登录和访问控制。
 
+## 用户访问与登录验证
+
+自行接入按 [Java 指南第 4 节](java-sdk.md#4-用户登录与授权事实) 实现。Example 的模板 `configuration.redirectUri` 应设为 `${publicBaseUrl}/example-api/login/callback`（无尾斜线）；通知受理后启用应用、绑定访问用户，再配置该用户的测试 `userToken`。
+
+在共享前端选择应用，打开“登录与授权”：
+
+1. 点击“第三方发起登录”：示例保存浏览器待登录记录，向平台申请带 state/PKCE 的授权码；标准回调只需 code/state，应用从待登录记录定位。
+2. 业务应用也可点击“从平台进入应用”：示例先设置待登录 Cookie，再以测试用户调用 `_redirect`，读取 `result.location` 导航；回调核对 platformId/applicationId 后兑换 Code。
+3. “刷新会话”展示核验后的应用、用户和权限；重放回调、修改 state 或平台入口的应用标识应被拒绝。“退出本地会话”只清理示例会话。
+
+两种按钮均由 Example 发起；未先发起而直接从外部平台打开的回调会被拒绝。“从平台进入应用”仅演示原始 `_redirect` 协议，待登录 Cookie 不能替代 state/PKCE 的 Code 绑定。真实产品建议按指南将平台到访统一为带 state/PKCE 的授权；Example 不提供平台登录页。登录代码由两个 Java 服务共用，见 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/example/ExampleService.java) 的 `login`、`callback`。`node examples/smoke/local-test.mjs` 自动验证这两种入口、PKCE、回调重放和本地退出。
+
 ## 共用前端开发
 
 ```sh
@@ -89,4 +101,4 @@ npm --prefix examples/shared-ui run dev
 EXAMPLE_URL=http://127.0.0.1:8090 node --test examples/smoke/smoke.test.mjs
 ```
 
-本轮验证使用本地模拟平台；真实平台的权限分配、网络入口和实际事件源仍需在目标环境按上述流程验收。
+两个 Java 服务使用本地模拟平台各通过 11 个场景，共 22 项，包含仅带 code/state 的标准授权回调、无待登录 Cookie、state/平台入口标识篡改及回调重放检查。真实平台的权限分配、网络入口和实际事件源仍需在目标环境按上述流程验收。
