@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: JetLinks SDK Example API
+  version: 2.0.0
+  description: 各语言 Example 共用的界面接口。平台通知、OAuth2 回调、命令协议由 SDK 处理。
+servers:
+  - url: /example-api
+paths:
+  /info:
+    get:
+      responses:
+        '200':
+          description: 服务语言、SDK 版本、features 数组及同步状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [language, sdkVersion, features]
+                properties:
+                  language: {type: string}
+                  sdkVersion: {type: string}
+                  features: {type: array, items: {type: string}}
+                  syncStatus: {type: string}
+  /applications:
+    get:
+      responses:
+        '200':
+          description: 已配置 API 应用和已验签建立的业务应用
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Application'}}
+  /applications/{contextId}:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    get:
+      responses:
+        '200':
+          description: 应用公开状态，不包含 Secret 或 Token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Application'}
+  /applications/{contextId}/requests:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: {type: string, default: /authorize/context}
+                method: {type: string, default: GET}
+                body: {}
+                authMode: {type: string, enum: [oauth2, local, user], default: oauth2}
+                client: {type: string, enum: [sync, reactive], default: reactive}
+                stream: {type: boolean, default: false}
+      responses:
+        '200':
+          description: 普通调用返回 durationMs/result，流式调用逐行返回 JSON
+          content:
+            application/json: {schema: {type: object, properties: {durationMs: {type: integer}, result: {}}}}
+            application/x-ndjson: {schema: {type: string}}
+  /applications/{contextId}/diagnostics:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    get:
+      responses:
+        '200': {description: 默认认证上下文的刷新/缓存命中/命令在途状态}
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {authMode: {type: string, enum: [oauth2, local, user]}}}
+      responses:
+        '200': {description: 指定认证上下文的脱敏状态}
+  /applications/{contextId}/login:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {entry: {type: string, enum: [platform, third-party]}}}
+      responses:
+        '200': {description: 返回 url 并设置 HttpOnly 待登录 Cookie；真实平台授权步骤需配置 userToken}
+  /login/callback:
+    get:
+      parameters:
+        - {in: query, name: code, required: true, schema: {type: string}}
+        - {in: query, name: state, schema: {type: string}}
+        - {in: query, name: platformId, schema: {type: string}}
+        - {in: query, name: applicationId, schema: {type: string}}
+      responses:
+        '302': {description: 消费 state/浏览器关联，兑换 Code，核对上下文，建立 HttpOnly 会话后返回首页}
+        '401': {$ref: '#/components/responses/Failure'}
+  /session:
+    get:
+      responses:
+        '200': {description: authenticated/contextId/context，不含访问 Token}
+    delete:
+      responses:
+        '200': {description: 清除 Example 本地会话，不代表平台全局退出}
+  /applications/{contextId}/authorization:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    get:
+      responses:
+        '200': {description: 最近完整成员/角色/用户角色/API 授权快照}
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operation: {type: string, enum: [roleAuthorization, roleMenus, assets]}
+                roleId: {type: string}
+      responses:
+        '200': {description: 未指定 operation 时重读完整快照；指定时返回角色功能/菜单/资产策略}
+  /applications/{contextId}/subscriptions:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                operation: {type: string, enum: [query, get, create, update, validate, enable, disable, delete, events, channels, tasks, records, payload]}
+                id: {type: string}
+                body: {}
+                taskId: {type: string}
+                attempt: {type: integer, minimum: 1}
+      responses:
+        '200': {description: 对应 SDK 方法的脱敏结果；管理身份需要平台明确授权}
+        '403': {$ref: '#/components/responses/Failure'}
+  /applications/{contextId}/commands:
+    parameters: [{$ref: '#/components/parameters/Context'}]
+    get:
+      responses:
+        '200': {description: capabilities 为本应用能力列表，records 为最近平台入站命令记录（最多 100 条，单条结果最多 100 项）}
+  /notifications:
+    get:
+      parameters:
+        - {in: query, name: pageIndex, schema: {type: integer, minimum: 0, default: 0}}
+        - {in: query, name: applicationId, schema: {type: string}}
+        - {in: query, name: platformId, schema: {type: string}}
+        - {in: query, name: channelId, schema: {type: string}, description: API 应用使用本地可信通道隔离，不是平台 Header}
+        - {in: query, name: type, schema: {type: string}, description: 精确事件类型}
+        - {in: query, name: eventId, schema: {type: string}}
+        - {in: query, name: status, schema: {type: string, enum: [accepted, duplicate, rejected]}}
+      responses:
+        '200':
+          description: 每页 50 条，先过滤后分页；新到旧排序
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, data]
+                properties:
+                  total: {type: integer}
+                  data: {type: array, items: {$ref: '#/components/schemas/Receipt'}}
+  /notifications/{recordId}:
+    get:
+      parameters:
+        - {in: path, name: recordId, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: 单条通知，rawBody 是脱敏展示视图，rawBodySha256 对应原始验签字节
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Receipt'}
+components:
+  parameters:
+    Context: {in: path, name: contextId, required: true, schema: {type: string}}
+  responses:
+    Failure:
+      description: 请求失败，保留实际 HTTP 状态
+      content:
+        application/json:
+          schema: {type: object, required: [error], properties: {error: {type: string}}}
+  schemas:
+    Application:
+      type: object
+      required: [contextId, type, platformId, applicationId, enabled, credentialReady]
+      properties:
+        contextId: {type: string}
+        type: {type: string, enum: [api, business]}
+        platformId: {type: string}
+        applicationId: {type: string}
+        apiBaseUrl: {type: string, nullable: true}
+        notificationUrl: {type: string}
+        keyRevision: {type: integer}
+        enabled: {type: boolean}
+        deleted: {type: boolean}
+        credentialReady: {type: boolean}
+    Receipt:
+      type: object
+      required: [recordId, receivedAt, verified, accepted, rawBody]
+      properties:
+        recordId: {type: string}
+        receivedAt: {type: integer, format: int64}
+        verified: {type: boolean}
+        accepted: {type: boolean}
+        duplicate: {type: boolean}
+        eventId: {type: string}
+        type: {type: string}
+        applicationId: {type: string}
+        platformId: {type: string}
+        channelId: {type: string}
+        rawBody: {type: string}
+        rawBodySha256: {type: string}
+        signatureHeaders: {type: object, additionalProperties: {type: array, items: {type: string}}}
+        event: {type: object}

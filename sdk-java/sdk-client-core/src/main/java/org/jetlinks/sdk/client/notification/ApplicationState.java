@@ -1,0 +1,40 @@
+package org.jetlinks.sdk.client.notification;
+
+/**
+ * 持久化的第三方应用实例状态，含生命周期边界；密钥只能保存在服务端。
+ *
+ * @since 2.0
+ */
+public final class ApplicationState {
+    public String platformId = "", applicationId, templateId, apiBaseUrl, accessKey, accessSecret;
+
+    /** 平台 application.createTime，标识同一应用 ID 的生命周期，与通知 occurredAt 不同。 */
+    public long createdAt;
+
+    public long keyRevision, updatedAt, deletedAt;
+    public boolean enabled = true;
+
+    public ApplicationState copy() {
+        ApplicationState n = new ApplicationState();
+        n.platformId = platformId;
+        n.applicationId = applicationId;
+        n.templateId = templateId;
+        n.apiBaseUrl = apiBaseUrl;
+        n.accessKey = accessKey;
+        n.accessSecret = accessSecret;
+        n.keyRevision = keyRevision;
+        n.createdAt = createdAt;
+        n.updatedAt = updatedAt;
+        n.deletedAt = deletedAt;
+        n.enabled = enabled;
+        return n;
+    }
+
+    public boolean active() {
+        return enabled
+                && deletedAt == 0
+                && accessKey != null
+                && accessSecret != null
+                && apiBaseUrl != null;
+    }
+}

@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+const base=(process.env.EXAMPLE_URL || 'http://127.0.0.1:8090').replace(/\/$/,'');
+async function json(path,options){const r=await fetch(base+path,options);assert.ok(r.ok, path+' HTTP '+r.status);return r.json()}
+test('serves the shared UI',async()=>{const r=await fetch(base+'/');assert.equal(r.status,200);assert.match(await r.text(),/JetLinks SDK/);});
+test('identifies backend through the common protocol',async()=>{const n=await json('/example-api/info');assert.equal(typeof n.language,'string');assert.equal(n.sdkVersion,'2.0.0-SNAPSHOT');for(const feature of ['requests','notifications','login','authorization','subscriptions','commands'])assert.ok(n.features.includes(feature));});
+test('lists safe application contexts',async()=>{const apps=await json('/example-api/applications');assert.ok(Array.isArray(apps));for(const a of apps){assert.equal(typeof a.contextId,'string');assert.ok(!('accessSecret' in a));assert.ok(!('accessToken' in a));assert.equal(typeof a.notificationUrl,'string');}});
+test('rejects unverified notifications and exposes rejected receipt',async()=>{const r=await fetch(base+'/jetlinks/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'smoke-'+Date.now(),data:{application:{id:'spoof'}}})});assert.equal(r.status,401);const n=await json('/example-api/notifications');assert.equal(typeof n.total,'number');assert.ok(n.data.some(item=>!item.verified&&!item.accepted));});
+test('never establishes a user session from callback parameters alone',async()=>{const r=await fetch(base+'/example-api/login/callback?code=untrusted&applicationId=spoof');assert.equal(r.status,401);const session=await json('/example-api/session');assert.equal(session.authenticated,false);});
