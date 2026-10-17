@@ -236,6 +236,42 @@ HTTP 适配器把 `GET /api/capabilities`、`POST /api/commands/1/{commandId}` �
 
 命令中的应用身份来自已验签 Header 和已保存实例凭据；处理器收到的保留 `applicationId/templateId` 由 SDK 填充。JSON/NDJSON 正文不聚合做签名，正文完整性依赖 HTTPS。请求 ID 用于排查，涉及写操作的业务幂等由处理器负责。
 
+平台标准命令使用 `CommandIds`，参数和结果位于 `org.jetlinks.sdk.client.command`：
+
+| ID 常量 | 参数 → 结果 | 输出 |
+| --- | --- | --- |
+| `GET_SERVICE_HEALTH` | 无 → `ServiceHealth`，状态 `UP` / `DOWN` | 单值 |
+| `GET_SERVICE_INFO` | 无 → `ServiceInfo`，服务名称/发布版本/描述 | 单值 |
+| `GET_TENANT_METRICS` | 无 → `TenantMetric`，完整指标定义 | 流 |
+| `READ_TENANT_USAGE` | `ReadTenantUsage` → `TenantUsage`，绝对用量快照 | 流 |
+| `SAVE_TENANT_LIMITS` | `SaveTenantLimits` → `SaveTenantLimits.Result` | 单值 |
+
+```java
+commands.register(CommandIds.GET_SERVICE_HEALTH, false,
+    (app, input) -> healthService.check(app)); // 实际检查，不将传输异常转成 DOWN
+commands.register(CommandIds.READ_TENANT_USAGE, true, ReadTenantUsage.class,
+    (app, input) -> resourceService.readUsage(app, input.metricIds));
+commands.register(CommandIds.SAVE_TENANT_LIMITS, false, SaveTenantLimits.class,
+    (app, snapshot) -> quotaRepository.replaceSnapshot(app, snapshot));
+```
+
+以上服务/仓库由接入方实现。指标 ID 使用 `resource:metric`，类型和限制方式沿平台枚举；单位由资源业务定义。
+`usage` 为 BigDecimal，`timestamp` / `nextResetTime` 为 epoch 毫秒，`windowDurationMillis` 为有效固定 Duration。
+未开通或缺失项省略，真实零正常返回；重复快照不能相加或无条件以差值扣费。
+
+配额请求示例：
+
+```json
+{"revision":7,"limits":[{"metricId":"example:requests","limit":1000,"windowDurationMillis":86400000}]}
+```
+
+处理器根据可信 `app` 确定归属，原子保存完整受管快照与业务版本：新版本应用、同版不重复执行、旧版不覆盖，
+返回当前已保存版本。遗漏的旧受管项撤销，空列表撤销全部；撤销不能变为无限，第三方自行管理的其他配额不受影响。
+更新绝对上限并保留已有用量：0 禁止新增、负数规范化为 -1 不限额，降额低于用量时阻止继续增长。
+窗口沿平台固定 Duration 处理；同窗口调额不能清零，不能自行解释为自然月或充值。
+平台业务在首次接入、额度变更和重同步时发送，同版重试必须是同一快照；超时不能判断第三方未执行。
+SDK 负责类型、验签与调用边界，版本及配额持久化由业务负责。共享示例 `ExampleStore` 提供单进程 H2 实现供参考。
+
 ## 6. Spring Boot
 
 引入 `org.jetlinks.sdk:sdk-client-spring-boot-starter:2.0.0-SNAPSHOT`，并使用应用已有的 WebFlux 或 MVC Starter。

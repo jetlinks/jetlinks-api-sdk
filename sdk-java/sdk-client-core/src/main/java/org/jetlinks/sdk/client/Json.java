@@ -14,7 +14,10 @@ import java.io.IOException;
  */
 public final class Json {
     public static final ObjectMapper MAPPER =
-            new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+            new ObjectMapper()
+                    .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    // 通用树/Map 解码也保留十进制值，避免类型化命令转换前已丢失精度。
+                    .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
 
     private Json() {}
 

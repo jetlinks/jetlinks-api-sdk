@@ -5,15 +5,19 @@ import com.fasterxml.jackson.databind.node.*;
 
 import org.jetlinks.sdk.client.*;
 import org.jetlinks.sdk.client.SdkException.Code;
+import org.jetlinks.sdk.client.command.*;
 import org.jetlinks.sdk.client.notification.*;
 
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.*;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 
 /**
  * 示例专用的 H2 持久化 inbox 和应用状态；JDBC 在专用线程执行，同一实例串行执行受理事务。
@@ -23,19 +27,28 @@ import java.util.function.Function;
 public final class ExampleStore implements NotificationStore {
     private final String url;
     private final Function<String, String> privateKeys;
+    private final LongSupplier clock;
 
     public ExampleStore(String database, Function<String, String> privateKeys) {
+        this(database, privateKeys, System::currentTimeMillis);
+    }
+
+    ExampleStore(String database, Function<String, String> privateKeys, LongSupplier clock) {
         url =
                 "jdbc:h2:"
                         + java.nio.file.Paths.get(database).toAbsolutePath().normalize()
                         + ";DB_CLOSE_ON_EXIT=FALSE";
         this.privateKeys = privateKeys;
+        this.clock = clock;
         try (Connection c = connection();
                 Statement s = c.createStatement()) {
             s.execute(
                     "CREATE TABLE IF NOT EXISTS apps (id VARCHAR(1024) PRIMARY KEY, body CLOB NOT"
                             + " NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS inbox (id VARCHAR(2048) PRIMARY KEY)");
+            s.execute(
+                    "CREATE TABLE IF NOT EXISTS tenant_quotas (id VARCHAR(2048) PRIMARY KEY, body"
+                            + " CLOB NOT NULL)");
             s.execute(
                     "CREATE TABLE IF NOT EXISTS receipts (id VARCHAR(64) PRIMARY KEY, received"
                             + " BIGINT NOT NULL, body CLOB NOT NULL)");
@@ -46,6 +59,168 @@ public final class ExampleStore implements NotificationStore {
 
     private Connection connection() throws SQLException {
         return DriverManager.getConnection(url, "sa", "");
+    }
+
+    /** 实际检查示例拥有的存储；公开结果不暴露 JDBC 地址或异常正文。 */
+    public Mono<ServiceHealth> health() {
+        return Mono.fromCallable(
+                        () -> {
+                            try (Connection c = connection();
+                                    Statement s = c.createStatement()) {
+                                s.executeQuery("SELECT 1").close();
+                                return new ServiceHealth(ServiceHealth.Status.UP, null);
+                            } catch (SQLException error) {
+                                return new ServiceHealth(
+                                        ServiceHealth.Status.DOWN, "Example storage unavailable");
+                            }
+                        })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** 示例单进程内与使用点串行；生产多副本须以数据库事务/条件更新保证同一原子边界。 */
+    public Mono<SaveTenantLimits.Result> saveLimits(
+            ApplicationState application, SaveTenantLimits input) {
+        return Mono.fromCallable(() -> saveLimitsNow(application, input))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private synchronized SaveTenantLimits.Result saveLimitsNow(
+            ApplicationState application, SaveTenantLimits input) throws SQLException {
+        if (input.revision == null || input.revision < 0 || input.limits == null) {
+            throw new SdkException(
+                    Code.INVALID_ARGUMENT, "revision and complete limits are required");
+        }
+        List<SaveTenantLimits.Limit> limits = new ArrayList<>();
+        for (SaveTenantLimits.Limit limit : input.limits) {
+            // 示例仅实现自己声明的一个周期指标；先校验整批，失败不保存任何状态。
+            if (limit == null
+                    || !ExampleService.REQUEST_METRIC.equals(limit.metricId)
+                    || limit.limit == null
+                    || !limits.isEmpty()
+                    || limit.windowDurationMillis == null
+                    || limit.windowDurationMillis <= 0) {
+                throw new SdkException(
+                        Code.INVALID_ARGUMENT, "Invalid example metric or fixed window");
+            }
+            SaveTenantLimits.Limit normalized = new SaveTenantLimits.Limit();
+            normalized.metricId = limit.metricId;
+            normalized.limit = limit.limit.signum() < 0 ? BigDecimal.ONE.negate() : limit.limit;
+            normalized.windowDurationMillis = limit.windowDurationMillis;
+            limits.add(normalized);
+        }
+        try (Connection c = connection()) {
+            QuotaState state = quota(c, application);
+            if (input.revision > state.revision) {
+                state.revision = input.revision;
+                state.limits = limits;
+                // 仅替换额度配置，绝不清零用量或改变已记录的统计窗口。
+                saveQuota(c, application, state);
+            }
+            return new SaveTenantLimits.Result(state.revision);
+        }
+    }
+
+    public Flux<TenantUsage> usage(ApplicationState application, ReadTenantUsage input) {
+        return Mono.fromCallable(() -> readUsage(application, input))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(Flux::fromIterable);
+    }
+
+    private synchronized List<TenantUsage> readUsage(
+            ApplicationState application, ReadTenantUsage input) throws SQLException {
+        try (Connection c = connection()) {
+            QuotaState state = quota(c, application);
+            if (state.limits.isEmpty()
+                    || input.metricIds != null
+                            && !input.metricIds.isEmpty()
+                            && !input.metricIds.contains(ExampleService.REQUEST_METRIC)) {
+                return Collections.emptyList();
+            }
+            return Collections.singletonList(snapshot(state, clock.getAsLong()));
+        }
+    }
+
+    /** 示例使用点校验并增加用量；额度不足或已撤销时失败，不写入失败的用量。 */
+    public Mono<TenantUsage> useResource(ApplicationState application, BigDecimal amount) {
+        return Mono.fromCallable(() -> useResourceNow(application, amount))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private synchronized TenantUsage useResourceNow(ApplicationState application, BigDecimal amount)
+            throws SQLException {
+        if (amount == null || amount.signum() <= 0) {
+            throw new SdkException(Code.INVALID_ARGUMENT, "Positive resource amount is required");
+        }
+        try (Connection c = connection()) {
+            QuotaState state = quota(c, application);
+            if (state.limits.isEmpty()) {
+                throw new SdkException(Code.LIMIT_EXCEEDED, "Example quota is not granted");
+            }
+            long now = clock.getAsLong();
+            TenantUsage snapshot = snapshot(state, now);
+            BigDecimal next = snapshot.usage.add(amount);
+            BigDecimal limit = state.limits.get(0).limit;
+            if (limit.signum() >= 0 && next.compareTo(limit) > 0) {
+                throw new SdkException(Code.LIMIT_EXCEEDED, "Example quota exceeded");
+            }
+            state.usage = next;
+            state.windowStart = snapshot.nextResetTime - snapshot.windowDurationMillis;
+            saveQuota(c, application, state);
+            snapshot.usage = next;
+            return snapshot;
+        }
+    }
+
+    private TenantUsage snapshot(QuotaState state, long now) {
+        long duration = state.limits.get(0).windowDurationMillis;
+        long start = Math.floorDiv(now, duration) * duration;
+        TenantUsage result = new TenantUsage();
+        result.metricId = ExampleService.REQUEST_METRIC;
+        result.usage = state.windowStart == start ? state.usage : BigDecimal.ZERO;
+        result.timestamp = now;
+        result.windowDurationMillis = duration;
+        result.nextResetTime = Math.addExact(start, duration);
+        return result;
+    }
+
+    private String quotaKey(ApplicationState application) {
+        // 相同应用 ID 删除后重建时，不继承上一生命周期的额度版本和用量。
+        return identity(application.platformId, application.applicationId)
+                + ":"
+                + application.createdAt;
+    }
+
+    private QuotaState quota(Connection c, ApplicationState application) throws SQLException {
+        try (PreparedStatement s =
+                c.prepareStatement("SELECT body FROM tenant_quotas WHERE id=?")) {
+            s.setString(1, quotaKey(application));
+            try (ResultSet r = s.executeQuery()) {
+                return r.next()
+                        ? Json.read(
+                                r.getString(1).getBytes(StandardCharsets.UTF_8),
+                                TypeRef.of(QuotaState.class))
+                        : new QuotaState();
+            }
+        }
+    }
+
+    private void saveQuota(Connection c, ApplicationState application, QuotaState state)
+            throws SQLException {
+        // 单行保存快照、版本和已有用量，避免成功版本对应部分额度。
+        try (PreparedStatement s =
+                c.prepareStatement("MERGE INTO tenant_quotas(id,body) KEY(id) VALUES(?,?)")) {
+            s.setString(1, quotaKey(application));
+            s.setString(2, new String(Json.bytes(state), StandardCharsets.UTF_8));
+            s.executeUpdate();
+        }
+    }
+
+    /** 示例私有持久化结构，不属于 SDK 线上契约。 */
+    private static class QuotaState {
+        public long revision = -1;
+        public List<SaveTenantLimits.Limit> limits = new ArrayList<>();
+        public BigDecimal usage = BigDecimal.ZERO;
+        public long windowStart = -1;
     }
 
     public static String identity(String platform, String app) {

@@ -64,6 +64,21 @@ curl -X POST http://127.0.0.1:19090/__fixture/command \
 
 API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（例如 `/jetlinks/events/api-prod`）。业务模板通知地址使用 `/jetlinks/events`，能力和命令地址分别为 `/api/capabilities`、`/api/commands/1/{commandId}`；平台配置 RSA 公钥，应用保管私钥。多个区域模板可共用同一套第三方应用，每个可信平台身份配置一条模板信任记录。
 
+两个 Java 服务共用五个标准命令：`GetServiceHealth` 实际检查示例数据库，`GetServiceInfo` 返回服务发布信息，
+`GetTenantMetrics` 声明 `example:requests` 周期配额指标，`ReadTenantUsage` 读取用量，`SaveTenantLimits` 保存完整快照。
+命令面板显示已验签的请求和结果，后续语言示例复用同一前端。
+
+通过模拟平台验证配额流程（命令入口如上文 `__fixture/command`）：
+
+1. `SaveTenantLimits` 发送 `{"revision":1,"limits":[{"metricId":"example:requests","limit":10,"windowDurationMillis":86400000}]}`。
+2. 示例业务命令 `UseExampleResource` 发送 `{"amount":4}`，返回用量 4；`ReadTenantUsage` 重复读取仍为 4。
+3. revision 2 将上限改为 3，已有用量仍为 4，继续使用失败；迟到的 revision 1 不覆盖当前配置。
+4. 新版本发送 `limits:[]` 撤销，使用失败；新版本重新授权时保留同窗口用量。
+
+`ExampleStore` 将版本、配额及用量保存到同一 H2 行；按平台、应用和生命周期隔离，重启后恢复。
+这是单进程示例，生产多副本应使用数据库事务/条件更新保证相同原子性；`UseExampleResource` 仅演示使用点，
+真实业务需自己的幂等键，不能以通知、查询或 HTTP 请求次数计费。`local-test.mjs` 对两种启动方式验证上述签名闭环。
+
 `managementToken` 为 API 示例可选字段，须是有订阅管理权限的测试用户 Token。`userToken` 可放在 API 或模板配置中，仅用于示例演示“已登录平台用户发起授权”的服务端步骤；它不会发给浏览器。真实产品应接自己的平台登录过程，不应共用测试用户 Token。
 
 流程：

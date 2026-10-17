@@ -17,6 +17,7 @@ import reactor.core.Disposable;
 import reactor.core.publisher.*;
 import reactor.core.scheduler.Schedulers;
 
+import java.math.BigDecimal;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -30,6 +31,8 @@ import java.util.concurrent.*;
  * @since 2.0
  */
 public final class ExampleService implements AutoCloseable {
+    public static final String REQUEST_METRIC = "example:requests";
+    public static final String USE_RESOURCE = "UseExampleResource";
     public final ExampleConfig config;
     public final ExampleStore store;
     private final NotificationVerifier verifier;
@@ -50,31 +53,44 @@ public final class ExampleService implements AutoCloseable {
         verifier = new NotificationVerifier(this::resolveKey);
         commands =
                 new CommandService((platform, app) -> store.find(platform, app), 8)
+                        .register(CommandIds.GET_SERVICE_HEALTH, false, (a, n) -> store.health())
                         .register(
-                                "GetMetrics",
+                                CommandIds.GET_SERVICE_INFO,
                                 false,
                                 (a, n) ->
                                         Mono.just(
-                                                Collections.singletonList(
-                                                        map(
-                                                                "id",
-                                                                "requests",
-                                                                "name",
-                                                                "Example requests",
-                                                                "unit",
-                                                                "count"))))
+                                                new ServiceInfo(
+                                                        "JetLinks Java Example",
+                                                        "2.0.0-SNAPSHOT",
+                                                        "共享接入示例")))
                         .register(
-                                "ReadUsage",
+                                CommandIds.GET_TENANT_METRICS,
                                 true,
-                                (a, n) ->
-                                        Flux.just(
-                                                map(
-                                                        "metricId",
-                                                        "requests",
-                                                        "value",
-                                                        commandRecordsSize(),
-                                                        "timestamp",
-                                                        System.currentTimeMillis())))
+                                (a, n) -> {
+                                    TenantMetric metric = new TenantMetric();
+                                    metric.id = REQUEST_METRIC;
+                                    metric.name = "示例资源使用次数";
+                                    metric.unit = "count";
+                                    metric.type = TenantMetric.ResourceType.request;
+                                    metric.limitType = TenantMetric.LimitType.quotaTimeLimit;
+                                    return Flux.just(metric);
+                                })
+                        .register(
+                                CommandIds.READ_TENANT_USAGE,
+                                true,
+                                ReadTenantUsage.class,
+                                (a, n) -> store.usage(a, n))
+                        .register(
+                                CommandIds.SAVE_TENANT_LIMITS,
+                                false,
+                                SaveTenantLimits.class,
+                                store::saveLimits)
+                        // 示例业务使用点；独立于查询次数、通知重试和 HTTP requestId。
+                        .register(
+                                USE_RESOURCE,
+                                false,
+                                UseResource.class,
+                                (a, n) -> store.useResource(a, n.amount))
                         .register("Echo", false, (a, n) -> Mono.just(n))
                         .register(
                                 "WatchUsage",
@@ -630,6 +646,11 @@ public final class ExampleService implements AutoCloseable {
         public int limit = 5;
     }
 
+    /** 示例业务操作的资源数量，不属于平台标准命令。 */
+    public static class UseResource {
+        public BigDecimal amount = BigDecimal.ONE;
+    }
+
     public static class AuthorizationSnapshot {
         public final List<Member> members;
         public final List<Role> roles;
@@ -944,10 +965,6 @@ public final class ExampleService implements AutoCloseable {
     private synchronized void addCommand(ObjectNode n) {
         while (commandRecords.size() >= 100) commandRecords.removeLast();
         commandRecords.addFirst(n);
-    }
-
-    private synchronized int commandRecordsSize() {
-        return commandRecords.size();
     }
 
     private synchronized JsonNode commandRecords(ApplicationState state) {

@@ -13,6 +13,8 @@ import reactor.test.StepVerifier;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.*;
 
 class HttpClientTest {
@@ -157,8 +159,8 @@ class HttpClientTest {
     }
 
     @Test
-    void ndjsonPreservesSplitUtf8AndCancels() {
-        AtomicBoolean cancelled = new AtomicBoolean();
+    void ndjsonPreservesSplitUtf8AndCancels() throws InterruptedException {
+        CountDownLatch cancelled = new CountDownLatch(1);
         byte[] line = "{\"message\":\"你好\"}\n".getBytes(StandardCharsets.UTF_8);
         List<byte[]> chunks = new ArrayList<>();
         for (byte b : line) chunks.add(new byte[] {b});
@@ -177,8 +179,7 @@ class HttpClientTest {
                                                 .sendString(
                                                         Flux.interval(Duration.ofMillis(10))
                                                                 .map(i -> "{\"i\":" + i + "}\n")
-                                                                .doOnCancel(
-                                                                        () -> cancelled.set(true))))
+                                                                .doOnCancel(cancelled::countDown)))
                         .bindNow();
         try (JetLinksReactiveClient client =
                 new JetLinksReactiveClient(
@@ -186,10 +187,11 @@ class HttpClientTest {
             StepVerifier.create(client.stream(ApiRequest.get("/stream")).take(2))
                     .expectNextCount(2)
                     .verifyComplete();
+            // 客户端取消与服务端收到断连异步发生，在主动释放服务端前确认取消已传播。
+            assertTrue(cancelled.await(5, TimeUnit.SECONDS));
         } finally {
             server.disposeNow();
         }
-        assertTrue(cancelled.get());
     }
 
     @Test

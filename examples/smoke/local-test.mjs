@@ -173,6 +173,33 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       assert.ok(records.records.every(r => r.platformId === 'east'));
       assert.equal((await operation(west, 'commands')).records.length, 0);
     });
+    await scenario('standard service queries and signed quota snapshot lifecycle', async () => {
+      async function command(id, input = {}, region = 'east', stream = false) {
+        const response = await fixture.command(region, id, input, { stream });
+        assert.equal(response.status, 200, id);
+        return stream ? (await response.text()).trim().split('\n').filter(Boolean).map(JSON.parse) : response.json();
+      }
+      const health = await command('GetServiceHealth'); assert.equal(health.status, 'UP');
+      const info = await command('GetServiceInfo'); assert.equal(info.name, 'JetLinks Java Example');
+      const metrics = await command('GetTenantMetrics', {}, 'east', true);
+      assert.equal(metrics[0].id, 'example:requests'); assert.equal(metrics[0].limitType, 'quotaTimeLimit');
+      const snapshot = (revision, limit) => ({ revision, limits: [{ metricId: 'example:requests', limit, windowDurationMillis: 86400000 }] });
+      assert.equal((await command('SaveTenantLimits', snapshot(1, 10))).revision, 1);
+      assert.equal((await command('UseExampleResource', { amount: 4 })).usage, 4);
+      assert.equal((await command('SaveTenantLimits', snapshot(2, 3))).revision, 2);
+      const lowered = await fixture.command('east', 'UseExampleResource', { amount: 1 });
+      assert.equal(lowered.status, 500); await lowered.text();
+      assert.equal((await command('SaveTenantLimits', snapshot(1, 100))).revision, 2);
+      assert.equal((await command('ReadTenantUsage', {}, 'east', true))[0].usage, 4);
+      assert.deepEqual(await command('ReadTenantUsage', {}, 'west', true), []);
+      assert.equal((await command('SaveTenantLimits', { revision: 3, limits: [] })).revision, 3);
+      assert.deepEqual(await command('ReadTenantUsage', {}, 'east', true), []);
+      assert.equal((await command('SaveTenantLimits', snapshot(4, -1))).revision, 4);
+      assert.equal((await command('UseExampleResource', { amount: 100 })).usage, 104);
+      // 同版重试模拟第三方已保存而平台未收到上次响应，不重复改变额度或用量。
+      assert.equal((await command('SaveTenantLimits', snapshot(4, -1))).revision, 4);
+      assert.equal((await command('ReadTenantUsage', {}, 'east', true))[0].usage, 104);
+    });
     await scenario('HTTP stream cancellation propagates to platform', async () => {
       const response = await fetch(base + '/example-api/applications/api/requests', { method: 'POST', body: JSON.stringify({ path: '/fixture/stream', stream: true }) });
       const reader = response.body.getReader(); assert.ok(!(await reader.read()).done); await reader.cancel();

@@ -2,6 +2,29 @@
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
+## 标准服务查询与配额同步
+
+按平台已确认契约实现 `CommandIds`、`ServiceHealth`、`ServiceInfo`、`TenantMetric`、`ReadTenantUsage`、
+`TenantUsage` 与 `SaveTenantLimits`。类型、指标完整标识、十进制值、固定窗口与业务版本语义见
+[Java 接入指南](../guides/java-sdk.md#5-api-订阅与第三方命令)。只镜像公开契约，不依赖平台或 hsweb。
+
+`ExampleService` 使用现有 `CommandService` 注册五个标准命令，能力来自真实处理器；`ExampleStore` 复用 H2，
+按平台/应用/生命周期保存完整受管配额、单调版本和已有用量。示例自定义 `UseExampleResource` 展示使用点检查，
+两个服务和后续语言共用前端及命令记录。生产持久化及多副本原子性仍由业务实现，平台额度变更不会自动推送。
+通用 JSON 树解码保留十进制精度，未增加命令专用解码器、同步中心或后台重试器。
+
+验证：Java 17 `mvn -o verify` 通过 72 项测试，0 失败/错误/跳过；两个 Java 17 可执行服务共通过 24 个独立模拟平台场景，
+新增标准服务查询与签名配额闭环。H2 测试覆盖绝对更新、同版/旧版、降额/撤销、真实零与缺失、窗口、并发、隔离和重启，
+高精度参数经过通用 JSON 树解码仍保持 BigDecimal。共享前端 lint、typecheck/build、核心依赖边界及 Java 格式/空白检查通过。
+日志：`/private/tmp/application-standard-commands-sdk-final.log`、`/private/tmp/application-standard-commands-e2e-final.log`、
+`/private/tmp/application-standard-commands-ui.log`。旧 CI 的 HTTP 取消测试在断连传播前立即断言，已改为在释放服务端前有界等待；
+定向 HTTP 测试 7 项及取消场景连续 5 次通过，日志为 `/private/tmp/application-sdk-http-cancel-final.log`、
+`/private/tmp/application-sdk-http-cancel-repeat.log`，不重复累计进 72 项。
+未连接真实平台、未发布制品；沿用 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15)，配套
+[组件 #1638](https://github.com/jetlinks-v2/jetlinks-components/pull/1638)、
+[认证 #359](https://github.com/jetlinks-v2/authentication-manager/pull/359) 与
+[租户 #35](https://github.com/jetlinks-v2/jetlinks-tenant/pull/35)。
+
 ## 接入实现收敛
 
 生命周期修复：复用 `application.createTime` 识别同 ID 应用的生命周期，`occurredAt` 只排序同一生命周期内的事实，凭据 revision 也仅在同一生命周期比较；创建通知保留平台实际启停状态。范围为 core 合并函数、现有通知夹具、示例和指南，不新增协议、状态字段或配置。集中验证同步先到、旧通知迟到、删除重建及停用创建，并审查平台创建时间、密钥维护和可靠投递边界。
