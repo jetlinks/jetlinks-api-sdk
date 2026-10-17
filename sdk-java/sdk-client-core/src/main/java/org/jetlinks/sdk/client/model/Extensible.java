@@ -17,12 +17,8 @@ public abstract class Extensible {
     private final Map<String, Object> additionalProperties = new LinkedHashMap<>();
 
     @JsonAnySetter
-    public void extension(String name, Object value) {
+    public void additionalProperty(String name, Object value) {
         additionalProperties.put(name, value);
-    }
-
-    public Map<String, Object> extensions() {
-        return additionalProperties;
     }
 
     /** 未建模字段展开到 JSON 顶层；与业务模型显式声明的 extensions 属性独立。 */

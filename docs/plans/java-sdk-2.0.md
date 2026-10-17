@@ -2,6 +2,14 @@
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
+## 接入实现收敛
+
+生命周期修复：复用 `application.createTime` 识别同 ID 应用的生命周期，`occurredAt` 只排序同一生命周期内的事实，凭据 revision 也仅在同一生命周期比较；创建通知保留平台实际启停状态。范围为 core 合并函数、现有通知夹具、示例和指南，不新增协议、状态字段或配置。集中验证同步先到、旧通知迟到、删除重建及停用创建，并审查平台创建时间、密钥维护和可靠投递边界。
+
+已按确认范围完成：示例仅从 `SnapshotSynchronizer.current()` 读取同步结果，应用状态变化时统一失效；生命周期地址沿用平台已有的 HTTP/HTTPS 规则，生产建议 HTTPS；未知顶层字段统一使用 `additionalProperties()`，公开事件上下文仍为 `StructuredEvent.extensions`。移除 `extensions()` 别名及额外的地址校验器，不新增功能、配置或兼容层。平台侧同步精简元数据缓存、生命周期载荷与身份复制。
+
+Java 17 `mvn -o verify` 通过 66 项测试，0 失败/错误/跳过；同一组 HTTP/HTTPS 正反例通过平台与 SDK 校验。生命周期回归覆盖同步先到、旧实例高 revision 迟到、删除后同步恢复新实例及停用创建；真实 HTTP/H2 测试覆盖凭据变更、删除重建后清除旧快照并重新同步。两个可执行服务通过独立本地模拟平台的 22 个端到端场景。扩展字段往返、MVC/WebFlux 回归、Java 格式和空白检查通过。日志：`/tmp/application-lifecycle-sdk-verify.log`、`/tmp/application-lifecycle-sdk-e2e.log`；未连接生产平台、未发布制品。
+
 ## 客户端命名
 
 目标：与服务端开发 SDK 区分。用户已确认执行；groupId 保持 `org.jetlinks.sdk`，根父 POM 改为 `sdk-client-parent`，Java 聚合为 `sdk-client`，核心及 Starter 为 `sdk-client-core`、`sdk-client-spring-boot-starter`。示例 Maven 制品统一使用 `sdk-client-example-*` 前缀，示例聚合为 `sdk-client-examples`。

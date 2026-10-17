@@ -7,7 +7,6 @@ import org.jetlinks.sdk.client.SdkException.Code;
 import org.jetlinks.sdk.client.crypto.Signatures;
 import org.jetlinks.sdk.client.event.*;
 
-import java.net.URI;
 import java.util.function.Function;
 
 /**
@@ -36,7 +35,19 @@ public final class ApplicationLifecycle {
         if (!EventTypes.isApplicationEvent(type)) return state;
         long time = notice.event.occurredAt == null ? -1 : notice.event.occurredAt;
         if (time < 0) throw new SdkException(Code.INVALID_ARGUMENT, "Missing lifecycle occurredAt");
-        if (time < state.createdAt) return state;
+        BusinessApplicationEventData<LifecyclePayload> data =
+                notice.data(new TypeRef<BusinessApplicationEventData<LifecyclePayload>>() {});
+        ApplicationInfo application = data.application;
+        long createdAt = application.createTime == null ? 0 : application.createTime;
+        // 创建时间是实例边界；同步可先于创建通知到达，旧实例的 revision 不能跨边界比较。
+        if (createdAt < state.createdAt || time < createdAt) return state;
+        if (createdAt > state.createdAt) {
+            state = new ApplicationState();
+            state.platformId = notice.platformId;
+            state.applicationId = notice.applicationId;
+            state.templateId = notice.key.templateId;
+            state.createdAt = createdAt;
+        }
         boolean created = APPLICATION_CREATED.equals(type);
         if (APPLICATION_DELETED.equals(type)) {
             if (time >= state.updatedAt) {
@@ -48,29 +59,19 @@ public final class ApplicationLifecycle {
             }
             return state;
         }
-        // 同步和更新不能恢复已删除实例；后续创建开启新生命周期，凭据版本仅在该生命周期内比较。
-        if (state.deletedAt > 0 && (!created || time <= state.deletedAt)) return state;
-        if (created && time > state.createdAt && (state.createdAt > 0 || time > state.updatedAt)) {
-            state = new ApplicationState();
-            state.platformId = notice.platformId;
-            state.applicationId = notice.applicationId;
-            state.templateId = notice.key.templateId;
-        }
-        // 凭据恢复后才到达的首个创建通知只补齐生命周期边界，不能覆盖已恢复的新状态。
-        if (created) state.createdAt = time;
-        BusinessApplicationEventData<LifecyclePayload> data =
-                notice.data(new TypeRef<BusinessApplicationEventData<LifecyclePayload>>() {});
-        ApplicationInfo application = data.application;
+        // 同一生命周期删除后不再恢复；新生命周期已在上方按创建时间独立初始化。
+        if (state.deletedAt > 0) return state;
         if (time >= state.updatedAt) {
             if (application.apiBaseUrl != null) {
                 String base = application.apiBaseUrl;
-                validateBase(base);
+                // 与客户端和平台通知保持相同的 HTTP/HTTPS 地址规则；生产环境应使用 HTTPS。
+                ApiRequest.get("/").target(base);
                 state.apiBaseUrl = base;
             }
             if (application.state != null)
                 state.enabled = ApplicationInfo.ENABLED.equals(application.state);
             if (APPLICATION_DISABLED.equals(type)) state.enabled = false;
-            if (APPLICATION_ENABLED.equals(type) || created) state.enabled = true;
+            if (APPLICATION_ENABLED.equals(type)) state.enabled = true;
             state.updatedAt = time;
         }
         EncryptedCredential c = data.payload == null ? null : data.payload.credential;
@@ -89,18 +90,5 @@ public final class ApplicationLifecycle {
             }
         }
         return state;
-    }
-
-    private static void validateBase(String base) {
-        ApiRequest.get("/").target(base);
-        URI u = URI.create(base);
-        if (!"https".equals(u.getScheme()) && !ArraysLoopback.isLoopback(u.getHost()))
-            throw new SdkException(Code.INVALID_ARGUMENT, "Application API URL requires HTTPS");
-    }
-
-    private static class ArraysLoopback {
-        static boolean isLoopback(String h) {
-            return "localhost".equals(h) || "127.0.0.1".equals(h) || "[::1]".equals(h);
-        }
     }
 }

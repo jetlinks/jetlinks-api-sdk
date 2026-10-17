@@ -9,7 +9,7 @@
 | API 应用 | 可信 API 地址、应用 ID、Access Key/Secret | 已配置的 Key/Secret |
 | 第三方业务应用 | 模板 platformId、模板 ID、通知 keyId/Secret、RSA 接收私钥 | 从验签后的生命周期通知解密取得 |
 
-业务应用按 `(platformId, applicationId)` 保存记录，API 地址使用通知中的 `data.application.apiBaseUrl`。`platformId` 对应平台模板配置，未配置时平台默认使用模板 ID。SDK 不发现区域，也不要求额外运维配置服务。
+业务应用按 `(platformId, applicationId)` 保存记录，API 地址使用通知中的 `data.application.apiBaseUrl`，保留网关前缀。SDK 与平台均支持 HTTP/HTTPS，生产环境使用 HTTPS。`platformId` 对应平台模板配置，未配置时平台默认使用模板 ID。SDK 不发现区域，也不要求额外运维配置服务。
 
 API 应用没有 `X-Platform-Id`；连接多个平台且应用 ID 重复时，以本地配置的通道/地址隔离客户端和通知接收地址。
 
@@ -97,7 +97,7 @@ if (EventTypes.APPLICATION_CREDENTIAL_SYNCED.equals(notice.event.type)) {
 }
 ```
 
-`EventTypes` 定义平台已知事件类型；目录事件的定义 ID 与通知 `type` 一致，能否订阅以实时目录为准。每次发生的事件实例 `id` 由平台生成。自定义事件继续使用字符串和自己的 DTO。签名 Header 名称使用 `ProtocolHeaders` 常量。新增服务端字段可从支持扩展的 DTO 的 `extensions()` 读取。
+`EventTypes` 定义平台已知事件类型；目录事件的定义 ID 与通知 `type` 一致，能否订阅以实时目录为准。每次发生的事件实例 `id` 由平台生成。自定义事件继续使用字符串和自己的 DTO。签名 Header 名称使用 `ProtocolHeaders` 常量。新增服务端字段通过 DTO 的 `additionalProperties()` 读取；公开事件上下文使用 `event.extensions`。
 
 `NotificationStore.accept` 在一个事务中完成：
 
@@ -105,7 +105,7 @@ if (EventTypes.APPLICATION_CREDENTIAL_SYNCED.equals(notice.event.type)) {
 2. 核对首次模板绑定或已有归属；调用 `ApplicationLifecycle.apply(previous, notice, privateKeyResolver)` 计算新状态。
 3. 保存 inbox、应用状态及后续工作记录，提交后返回成功。重复已持久事件返回 `false`，HTTP 仍 ACK；存储失败返回非 2xx 让平台重投。
 
-生命周期合并处理启停、删除、迟到、同 ID 重建及凭据版本。新的创建事件开启独立生命周期，即使旧删除通知尚未到达，凭据版本也从新生命周期重新比较。RSA 解密采用 OAEP-SHA256/MGF1-SHA256，私钥为 PKCS#8 PEM。`credential.synced` 用于恢复平台当前凭据，不会产生新 Key；轮换须由平台显式操作触发。API 地址、凭据、启停状态变化时应用应淘汰相关客户端/缓存。
+生命周期合并以 `data.application.createTime` 区分同 ID 应用重建，`occurredAt` 排序同一生命周期的状态，凭据版本也仅在同一生命周期内比较。凭据同步先到也能识别新实例，旧实例通知不能覆盖新状态或密钥；创建通知保留平台实际启停状态。RSA 解密采用 OAEP-SHA256/MGF1-SHA256，私钥为 PKCS#8 PEM。`credential.synced` 恢复平台当前凭据，不生成新 Key；轮换由平台显式操作触发。API 地址、凭据、启停状态变化时应淘汰相关客户端/缓存。
 
 示例实现见 `sdk-java/examples/example-common/.../ExampleStore.java`：H2 事务受理，JDBC 在阻塞专用线程执行。生产环境可使用自己的数据库和事务机制。
 
@@ -202,7 +202,7 @@ Authorization: Bearer <当前平台用户 Token>
 
 `BusinessApplications` 的成员、角色、关系、API 授权、角色权限和菜单分别返回 `Member`、`Role`、`UserRole`、`ApiGrant`、`RoleAuthorization`、`RoleMenu` 流；`assets(role)` 返回 `List<AssetAccesses>`。关系通知只触发重读完整事实，不当作权限快照；SDK 不计算平台有效权限。
 
-`SnapshotSynchronizer` 在订阅时合并在途同步，重复订阅 `refresh()` 返回值也遵循相同规则；全部读取成功后再替换快照，失败保留上次结果并冷却 1 秒。单个调用方取消不会中断共享同步。Example 演示启动/定期同步和通知触发。
+`SnapshotSynchronizer` 在订阅时合并在途同步，重复订阅 `refresh()` 返回值也遵循相同规则；全部读取成功后再替换快照，失败保留上次结果并冷却 1 秒。单个调用方取消不会中断共享同步。通过 `current()` 读取最后成功结果，无需额外缓存；应用凭据、地址或启停状态变化时移除旧同步器。Example 演示启动/定期同步和通知触发。
 
 可运行实现见 [Example 配置与验证](examples.md#用户访问与登录验证)，核心流程在 [ExampleService](../../sdk-java/examples/example-common/src/main/java/org/jetlinks/sdk/client/example/ExampleService.java) 的 `login`、`callback`；应用可复用 SDK 实现自己的控制器和会话，不需要依赖 Example。
 

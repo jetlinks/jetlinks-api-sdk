@@ -78,10 +78,10 @@ class ModelContractTest {
         assertEquals("device-1", notice.event.subject);
         assertEquals("source", data.sourceEventId);
         assertEquals("member", data.payload.value.get(0).id);
-        assertEquals("east", data.payload.value.get(0).extensions().get("region"));
-        assertEquals(42, notice.event.extensions().get("future"));
+        assertEquals("east", data.payload.value.get(0).additionalProperties().get("region"));
+        assertEquals(42, notice.event.additionalProperties().get("future"));
         assertEquals("tenant-a", notice.event.extensions.get("tenantId"));
-        assertFalse(notice.event.extensions().containsKey("extensions"));
+        assertFalse(notice.event.additionalProperties().containsKey("extensions"));
         var encoded = Json.parse(Json.bytes(notice.event));
         assertEquals("tenant-a", encoded.path("extensions").path("tenantId").asText());
         assertEquals(42, encoded.path("future").asInt());
@@ -390,7 +390,8 @@ class ModelContractTest {
                         new JetLinksReactiveClient(base, TokenProvider.anonymous());
                 OAuth2 oauth = new OAuth2(base, "key", "secret", true)) {
             BusinessApplications business = new BusinessApplications(client, "app");
-            assertEquals("east", business.members().blockFirst().extensions().get("region"));
+            assertEquals(
+                    "east", business.members().blockFirst().additionalProperties().get("region"));
             assertEquals("enabled", business.roles().blockFirst().state.value);
             assertEquals("enabled", Json.convert("enabled", EnumValue.class).value);
             assertEquals("role", business.userRoles().blockFirst().roleId);

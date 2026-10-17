@@ -27,6 +27,7 @@ import javax.crypto.spec.*;
 
 class ExampleIntegrationTest {
     @TempDir Path temp;
+    private final long applicationCreatedAt = System.currentTimeMillis();
 
     JsonNode read(ExampleResponse r) {
         return Json.parse(
@@ -88,6 +89,7 @@ class ExampleIntegrationTest {
         data.putObject("application")
                 .put("id", "same-app")
                 .put("templateId", "template")
+                .put("createTime", applicationCreatedAt)
                 .put("apiBaseUrl", base);
         data.putObject("payload")
                 .putObject("credential")
@@ -245,6 +247,116 @@ class ExampleIntegrationTest {
                                         .block());
                 assertTrue(facts.has("members"));
                 assertTrue(facts.has("roles"));
+                String factsPath = "/example-api/applications/" + id + "/authorization";
+                assertTrue(
+                        read(restarted
+                                        .handle(
+                                                "GET",
+                                                factsPath,
+                                                Collections.emptyMap(),
+                                                new byte[0])
+                                        .block())
+                                .has("members"));
+                long changedAt = sync.path("occurredAt").asLong() + 1;
+                ObjectNode rotated =
+                        event("east", "application.credential.rotated", "rotated", base);
+                rotated.put("occurredAt", changedAt);
+                ((ObjectNode) rotated.path("data").path("payload").path("credential"))
+                        .put("keyRevision", 2);
+                assertEquals(
+                        204,
+                        restarted
+                                .handle(
+                                        "POST",
+                                        "/jetlinks/events",
+                                        signed("east", rotated),
+                                        Json.bytes(rotated))
+                                .block()
+                                .status);
+                assertEquals(
+                        "not synchronized",
+                        read(restarted
+                                        .handle(
+                                                "GET",
+                                                factsPath,
+                                                Collections.emptyMap(),
+                                                new byte[0])
+                                        .block())
+                                .path("state")
+                                .asText());
+                assertTrue(
+                        read(restarted
+                                        .handle(
+                                                "POST",
+                                                factsPath,
+                                                Collections.emptyMap(),
+                                                Json.bytes(Collections.emptyMap()))
+                                        .block())
+                                .has("members"));
+                ObjectNode deleted = event("east", "application.deleted", "deleted", base);
+                deleted.put("occurredAt", changedAt + 1);
+                assertEquals(
+                        204,
+                        restarted
+                                .handle(
+                                        "POST",
+                                        "/jetlinks/events",
+                                        signed("east", deleted),
+                                        Json.bytes(deleted))
+                                .block()
+                                .status);
+                assertFalse(restarted.store.find("east", "same-app").block().active());
+                ObjectNode recreated = event("east", "application.created", "recreated", base);
+                recreated.put("occurredAt", changedAt + 2);
+                ((ObjectNode) recreated.path("data").path("application"))
+                        .put("createTime", changedAt + 2);
+                assertEquals(
+                        204,
+                        restarted
+                                .handle(
+                                        "POST",
+                                        "/jetlinks/events",
+                                        signed("east", recreated),
+                                        Json.bytes(recreated))
+                                .block()
+                                .status);
+                assertEquals(1, restarted.store.find("east", "same-app").block().keyRevision);
+                ObjectNode lateRotation =
+                        event("east", "application.credential.rotated", "late-old-rotation", base);
+                lateRotation.put("occurredAt", changedAt + 3);
+                ((ObjectNode) lateRotation.path("data").path("payload").path("credential"))
+                        .put("keyRevision", 3);
+                assertEquals(
+                        204,
+                        restarted
+                                .handle(
+                                        "POST",
+                                        "/jetlinks/events",
+                                        signed("east", lateRotation),
+                                        Json.bytes(lateRotation))
+                                .block()
+                                .status);
+                assertEquals(1, restarted.store.find("east", "same-app").block().keyRevision);
+                assertEquals(
+                        "not synchronized",
+                        read(restarted
+                                        .handle(
+                                                "GET",
+                                                factsPath,
+                                                Collections.emptyMap(),
+                                                new byte[0])
+                                        .block())
+                                .path("state")
+                                .asText());
+                assertTrue(
+                        read(restarted
+                                        .handle(
+                                                "POST",
+                                                factsPath,
+                                                Collections.emptyMap(),
+                                                Json.bytes(Collections.emptyMap()))
+                                        .block())
+                                .has("members"));
             }
         } finally {
             platform.disposeNow();

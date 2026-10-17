@@ -54,7 +54,7 @@ export async function createFixture({ port = 19090, exampleUrl = 'http://127.0.0
   const applications = new Map([
     ['api', { region: 'api', id: 'api-app', key: 'api-key', secret: 'api-secret-fixture-only', revision: 1, enabled: true }],
     ['api2', { region: 'api2', id: 'api-app', key: 'api-key', secret: 'api-secret-fixture-only', revision: 1, enabled: true }],
-    ...['east', 'west'].map(region => [region, { region, id: 'same-app', key: region + '-key-1', secret: region + '-secret-fixture-only-1', revision: 1, enabled: true }]),
+    ...['east', 'west'].map(region => [region, { region, id: 'same-app', key: region + '-key-1', secret: region + '-secret-fixture-only-1', revision: 1, enabled: true, createTime: Date.now() }]),
   ]);
   const tokens = new Map(), codes = new Map(), subscriptions = new Map(), notices = new Map();
   const counters = { machineTokens: {}, localRequests: 0, requests: 0, cancelledStreams: 0, factPages: 0 };
@@ -102,8 +102,10 @@ export async function createFixture({ port = 19090, exampleUrl = 'http://127.0.0
     const api = region.startsWith('api'), id = options.eventId || tokenId();
     let event = notices.get(options.replay);
     if (!event) {
-      event = { id, type, occurredAt: options.occurredAt || (clock = Math.max(Date.now(), clock + 1)), subject: 'unrelated-device-id', data: api ? { message: '你好', application: { id: 'payload-is-not-identity' } } : {
-        application: { id: app.id, templateId: 'template', apiBaseUrl: options.apiBaseUrl || base(region), state: app.enabled ? 'enabled' : 'disabled' },
+      const occurredAt = options.occurredAt || (clock = Math.max(Date.now(), clock + 1));
+      if (options.recreate) app.createTime = occurredAt;
+      event = { id, type, occurredAt, subject: 'unrelated-device-id', data: api ? { message: '你好', application: { id: 'payload-is-not-identity' } } : {
+        application: { id: app.id, templateId: 'template', createTime: app.createTime, apiBaseUrl: options.apiBaseUrl || base(region), state: app.enabled ? 'enabled' : 'disabled' },
         payload: {},
       } };
       if (!api && ['application.created', 'application.credential.rotated', 'application.credential.synced'].includes(type)) {

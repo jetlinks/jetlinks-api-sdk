@@ -35,7 +35,6 @@ public final class ExampleService implements AutoCloseable {
     private final NotificationVerifier verifier;
     private final CommandService commands;
     private final Map<String, Handle> clients = new ConcurrentHashMap<>();
-    private final Map<String, AuthorizationSnapshot> snapshots = new ConcurrentHashMap<>();
     private final Map<String, SnapshotSynchronizer<AuthorizationSnapshot>> synchronizers =
             new ConcurrentHashMap<>();
     private final Set<String> dirty = ConcurrentHashMap.newKeySet();
@@ -448,7 +447,7 @@ public final class ExampleService implements AutoCloseable {
                                     "syncStatus",
                                     syncStatus,
                                     "snapshotAvailable",
-                                    snapshots.containsKey(context))));
+                                    snapshot(context) != null)));
         if (action.equals("authorization")) {
             BusinessApplications business =
                     new BusinessApplications(handle.client, state.applicationId);
@@ -467,7 +466,7 @@ public final class ExampleService implements AutoCloseable {
             Mono<AuthorizationSnapshot> snapshot =
                     "POST".equals(method)
                             ? synchronize(context, state)
-                            : Mono.justOrEmpty(snapshots.get(context));
+                            : Mono.justOrEmpty(snapshot(context));
             return snapshot.map(ExampleResponse::json)
                     .defaultIfEmpty(ExampleResponse.json(map("state", "not synchronized")));
         }
@@ -578,10 +577,17 @@ public final class ExampleService implements AutoCloseable {
                 .map(
                         values -> {
                             AuthorizationSnapshot snapshot = values.get(0);
-                            snapshots.put(id, snapshot);
                             syncStatus = "synchronized";
                             return snapshot;
                         });
+    }
+
+    /** 同步结果只由同步器持有；移除同步器后，旧刷新完成也不能重新发布到当前应用。 */
+    private AuthorizationSnapshot snapshot(String id) {
+        SnapshotSynchronizer<AuthorizationSnapshot> sync = synchronizers.get(id);
+        if (sync == null) return null;
+        List<AuthorizationSnapshot> values = sync.current();
+        return values.isEmpty() ? null : values.get(0);
     }
 
     private Mono<AuthorizationSnapshot> loadSnapshot(String id) {

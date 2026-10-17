@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.*;
 import org.jetlinks.sdk.client.crypto.*;
 import org.jetlinks.sdk.client.notification.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import reactor.core.publisher.Mono;
 
@@ -44,12 +46,19 @@ class LifecycleTest {
     }
 
     public static VerifiedNotification notice(String type, long time, int revision, String base) {
+        return notice(type, time, revision, base, 100, "enabled");
+    }
+
+    private static VerifiedNotification notice(
+            String type, long time, int revision, String base, long createdAt, String state) {
         ObjectNode event = Json.MAPPER.createObjectNode();
         event.put("id", "evt-" + type + "-" + time).put("type", type).put("occurredAt", time);
         ObjectNode data = event.putObject("data");
         data.putObject("application")
                 .put("id", "app")
                 .put("templateId", "template")
+                .put("createTime", createdAt)
+                .put("state", state)
                 .put("apiBaseUrl", base);
         if (revision > 0)
             data.putObject("payload")
@@ -120,6 +129,124 @@ class LifecycleTest {
         assertEquals(2, unchanged.keyRevision);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"enabled", "disabled"})
+    void creationPreservesPlatformState(String platformState) {
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null,
+                        notice("application.created", 110, 1, "https://p/api", 100, platformState),
+                        k -> pem);
+        assertEquals("enabled".equals(platformState), state.enabled);
+        assertEquals("enabled".equals(platformState), state.active());
+        assertEquals(100, state.createdAt);
+    }
+
+    @Test
+    void syncBeforeCreationRejectsOldLifecycleStateAndCredentials() {
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null,
+                        notice(
+                                "application.credential.synced",
+                                500,
+                                1,
+                                "https://p/new",
+                                400,
+                                "enabled"),
+                        k -> pem);
+        for (String type :
+                List.of(
+                        "application.created",
+                        "application.credential.rotated",
+                        "application.credential.synced",
+                        "application.disabled",
+                        "application.deleted")) {
+            // 即使旧事实迟至新同步之后才形成通知，也只能影响它原属的生命周期。
+            state =
+                    ApplicationLifecycle.apply(
+                            state,
+                            notice(type, 600, 3, "https://p/old", 100, "disabled"),
+                            k -> pem);
+            assertTrue(state.active(), type);
+            assertEquals(400, state.createdAt, type);
+            assertEquals(1, state.keyRevision, type);
+            assertEquals("access-1", state.accessKey, type);
+            assertEquals("https://p/new", state.apiBaseUrl, type);
+        }
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice("application.created", 410, 1, "https://p/initial", 400, "enabled"),
+                        k -> pem);
+        assertEquals(500, state.updatedAt);
+        assertEquals("https://p/new", state.apiBaseUrl);
+    }
+
+    @Test
+    void syncCanRestoreRecreatedApplicationAfterPreviousDeletion() {
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null, notice("application.created", 100, 3, "https://p/old"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state, notice("application.deleted", 300, 0, "https://p/old"), k -> pem);
+        state =
+                ApplicationLifecycle.apply(
+                        state,
+                        notice(
+                                "application.credential.synced",
+                                500,
+                                1,
+                                "https://p/new",
+                                400,
+                                "disabled"),
+                        k -> pem);
+        assertEquals(0, state.deletedAt);
+        assertEquals(400, state.createdAt);
+        assertEquals(1, state.keyRevision);
+        assertEquals("access-1", state.accessKey);
+        assertFalse(state.enabled);
+        assertFalse(state.active());
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "http://192.168.35.103:9111/api",
+                "http://platform.example/gateway/api",
+                "https://platform.example/gateway/api",
+                "http://127.0.0.1:9111/api",
+                "http://[::1]:9111/api"
+            })
+    void acceptsPlatformHttpAndHttpsAddresses(String base) {
+        ApplicationState state =
+                ApplicationLifecycle.apply(
+                        null, notice("application.updated", 100, 0, base), key -> null);
+        assertEquals(base, state.apiBaseUrl);
+        assertEquals(
+                base + "/authorize/context", ApiRequest.get("/authorize/context").target(base));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "/",
+                "/api",
+                "ftp://platform.example/api",
+                "https://user:secret@platform.example/api",
+                "http://platform.example/api?x=1",
+                "http://platform.example/api#fragment",
+                "http://platform.example:65536/api"
+            })
+    void rejectsInvalidPlatformAddresses(String base) {
+        assertThrows(
+                SdkException.class,
+                () ->
+                        ApplicationLifecycle.apply(
+                                null, notice("application.updated", 100, 0, base), key -> null));
+    }
+
     @Test
     void recreatedBeforeOldDeletionUsesNewCredentialsAndRejectsOldEvents() {
         ApplicationState state =
@@ -128,7 +255,13 @@ class LifecycleTest {
         state =
                 ApplicationLifecycle.apply(
                         state,
-                        notice("application.created", 400, 1, "https://p/recreated"),
+                        notice(
+                                "application.created",
+                                400,
+                                1,
+                                "https://p/recreated",
+                                400,
+                                "enabled"),
                         k -> pem);
         assertEquals(400, state.createdAt);
         assertEquals(1, state.keyRevision);
@@ -212,7 +345,13 @@ class LifecycleTest {
         state =
                 ApplicationLifecycle.apply(
                         state,
-                        notice("application.created", 400, 1, "https://p/recreated"),
+                        notice(
+                                "application.created",
+                                400,
+                                1,
+                                "https://p/recreated",
+                                400,
+                                "enabled"),
                         k -> pem);
         assertEquals(1, state.keyRevision);
         assertTrue(state.active());

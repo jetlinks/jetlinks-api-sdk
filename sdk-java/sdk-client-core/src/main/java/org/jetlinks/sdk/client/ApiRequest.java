@@ -88,7 +88,9 @@ public final class ApiRequest {
                 || uri.getUserInfo() != null
                 || uri.getQuery() != null
                 || uri.getFragment() != null
-                || !Arrays.asList("http", "https").contains(uri.getScheme()))
+                || uri.getPort() > 65535
+                || !("http".equalsIgnoreCase(uri.getScheme())
+                        || "https".equalsIgnoreCase(uri.getScheme())))
             throw new SdkException(Code.INVALID_ARGUMENT, "Invalid API base URL");
         StringBuilder out = new StringBuilder(base.replaceAll("/+$", "")).append(path);
         query.forEach(

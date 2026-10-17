@@ -7,7 +7,11 @@ package org.jetlinks.sdk.client.notification;
  */
 public final class ApplicationState {
     public String platformId = "", applicationId, templateId, apiBaseUrl, accessKey, accessSecret;
-    public long keyRevision, createdAt, updatedAt, deletedAt;
+
+    /** 平台 application.createTime，标识同一应用 ID 的生命周期，与通知 occurredAt 不同。 */
+    public long createdAt;
+
+    public long keyRevision, updatedAt, deletedAt;
     public boolean enabled = true;
 
     public ApplicationState copy() {
