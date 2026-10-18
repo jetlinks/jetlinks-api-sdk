@@ -1,6 +1,6 @@
 package org.jetlinks.sdk.client.command;
 
-/** 平台资源指标定义；id 为完整 resource:metric，unit 由资源业务约定。 @since 2.0 */
+/** 资源内的指标定义；id 为局部标识，查询用量和保存额度时使用 resource:metric。 @since 2.0 */
 public class TenantMetric {
     public enum ResourceType {
         entity,

@@ -242,31 +242,36 @@ HTTP 适配器把 `GET /api/capabilities`、`POST /api/commands/1/{commandId}` �
 | --- | --- | --- |
 | `GET_SERVICE_HEALTH` | 无 → `ServiceHealth`，状态 `UP` / `DOWN` | 单值 |
 | `GET_SERVICE_INFO` | 无 → `ServiceInfo`，服务名称/发布版本/描述 | 单值 |
-| `GET_TENANT_METRICS` | 无 → `TenantMetric`，完整指标定义 | 流 |
+| `GET_TENANT_RESOURCES` | 无 → `TenantResource`，资源内含指标与功能定义 | 流 |
 | `READ_TENANT_USAGE` | `ReadTenantUsage` → `TenantUsage`，绝对用量快照 | 流 |
 | `SAVE_TENANT_LIMITS` | `SaveTenantLimits` → `SaveTenantLimits.Result` | 单值 |
 
 ```java
 commands.register(CommandIds.GET_SERVICE_HEALTH, false,
     (app, input) -> healthService.check(app)); // 实际检查，不将传输异常转成 DOWN
+commands.register(CommandIds.GET_TENANT_RESOURCES, true,
+    (app, input) -> resourceService.getResources(app));
 commands.register(CommandIds.READ_TENANT_USAGE, true, ReadTenantUsage.class,
     (app, input) -> resourceService.readUsage(app, input.metricIds));
 commands.register(CommandIds.SAVE_TENANT_LIMITS, false, SaveTenantLimits.class,
     (app, snapshot) -> quotaRepository.replaceSnapshot(app, snapshot));
 ```
 
-以上服务/仓库由接入方实现。指标 ID 使用 `resource:metric`，类型和限制方式沿平台枚举；单位由资源业务定义。
+以上服务/仓库由接入方实现。`TenantResource` 包含 `id/name/metrics/capabilities`，目录不包含当前用量或已授予额度。
+资源 ID 应稳定且全局唯一；`metrics` 内的 `TenantMetric.id` 是局部 ID，查询用量与保存额度才使用完整 `resource:metric`。
+类型和限制方式沿平台枚举；单位由资源业务定义。资源功能 `capabilities` 使用 `id/name`，与 HTTP 命令能力清单分开。
 `usage` 为 BigDecimal，`timestamp` / `nextResetTime` 为 epoch 毫秒，`windowDurationMillis` 为有效固定 Duration。
 未开通或缺失项省略，真实零正常返回；重复快照不能相加或无条件以差值扣费。
 
 配额请求示例：
 
 ```json
-{"revision":7,"limits":[{"metricId":"example:requests","limit":1000,"windowDurationMillis":86400000}]}
+{"revision":7,"limits":[{"metricId":"example:requests","limit":1000,"windowDurationMillis":86400000}],"capabilities":[{"resource":"example","capabilities":["use"]}]}
 ```
 
 处理器根据可信 `app` 确定归属，原子保存完整受管快照与业务版本：新版本应用、同版不重复执行、旧版不覆盖，
-返回当前已保存版本。遗漏的旧受管项撤销，空列表撤销全部；撤销不能变为无限，第三方自行管理的其他配额不受影响。
+返回当前已保存版本。`limits/capabilities` 均须显式提供，遗漏的旧受管项撤销，空列表撤销对应受管配置；
+撤销不能变为无限，第三方自行管理的其他配置不受影响。额度与资源功能使用同一版本并原子保存。
 更新绝对上限并保留已有用量：0 禁止新增、负数规范化为 -1 不限额，降额低于用量时阻止继续增长。
 窗口沿平台固定 Duration 处理；同窗口调额不能清零，不能自行解释为自然月或充值。
 平台业务在首次接入、额度变更和重同步时发送，同版重试必须是同一快照；超时不能判断第三方未执行。

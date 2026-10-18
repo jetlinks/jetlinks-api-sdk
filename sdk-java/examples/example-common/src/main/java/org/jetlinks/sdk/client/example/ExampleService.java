@@ -31,7 +31,10 @@ import java.util.concurrent.*;
  * @since 2.0
  */
 public final class ExampleService implements AutoCloseable {
-    public static final String REQUEST_METRIC = "example:requests";
+    public static final String RESOURCE_ID = "example";
+    public static final String REQUEST_METRIC_ID = "requests";
+    public static final String REQUEST_METRIC = RESOURCE_ID + ":" + REQUEST_METRIC_ID;
+    public static final String USE_CAPABILITY = "use";
     public static final String USE_RESOURCE = "UseExampleResource";
     public final ExampleConfig config;
     public final ExampleStore store;
@@ -64,16 +67,24 @@ public final class ExampleService implements AutoCloseable {
                                                         "2.0.0-SNAPSHOT",
                                                         "共享接入示例")))
                         .register(
-                                CommandIds.GET_TENANT_METRICS,
+                                CommandIds.GET_TENANT_RESOURCES,
                                 true,
                                 (a, n) -> {
                                     TenantMetric metric = new TenantMetric();
-                                    metric.id = REQUEST_METRIC;
+                                    metric.id = REQUEST_METRIC_ID;
                                     metric.name = "示例资源使用次数";
                                     metric.unit = "count";
                                     metric.type = TenantMetric.ResourceType.request;
                                     metric.limitType = TenantMetric.LimitType.quotaTimeLimit;
-                                    return Flux.just(metric);
+                                    TenantResource resource = new TenantResource();
+                                    resource.id = RESOURCE_ID;
+                                    resource.name = "示例资源";
+                                    resource.metrics = List.of(metric);
+                                    resource.capabilities =
+                                            List.of(
+                                                    new TenantResource.Capability(
+                                                            USE_CAPABILITY, "使用资源"));
+                                    return Flux.just(resource);
                                 })
                         .register(
                                 CommandIds.READ_TENANT_USAGE,

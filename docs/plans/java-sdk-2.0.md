@@ -4,22 +4,26 @@
 
 ## 标准服务查询与配额同步
 
-按平台已确认契约实现 `CommandIds`、`ServiceHealth`、`ServiceInfo`、`TenantMetric`、`ReadTenantUsage`、
+按平台已确认契约实现 `CommandIds`、`ServiceHealth`、`ServiceInfo`、`TenantResource`、`TenantMetric`、`ReadTenantUsage`、
 `TenantUsage` 与 `SaveTenantLimits`。类型、指标完整标识、十进制值、固定窗口与业务版本语义见
 [Java 接入指南](../guides/java-sdk.md#5-api-订阅与第三方命令)。只镜像公开契约，不依赖平台或 hsweb。
 
 `ExampleService` 使用现有 `CommandService` 注册五个标准命令，能力来自真实处理器；`ExampleStore` 复用 H2，
 按平台/应用/生命周期保存完整受管配额、单调版本和已有用量。示例自定义 `UseExampleResource` 展示使用点检查，
-两个服务和后续语言共用前端及命令记录。生产持久化及多副本原子性仍由业务实现，平台额度变更不会自动推送。
+两个服务和后续语言共用前端及命令记录。资源目录使用 `GetTenantResources`，指标在资源内使用局部 ID；
+`SaveTenantLimits` 的 `limits/capabilities` 均显式提供，与版本原子保存，示例使用点同时检查资源功能。
+生产持久化及多副本原子性仍由业务实现，平台额度变更不会自动推送。
 通用 JSON 树解码保留十进制精度，未增加命令专用解码器、同步中心或后台重试器。
 
-验证：Java 17 `mvn -o verify` 通过 72 项测试，0 失败/错误/跳过；两个 Java 17 可执行服务共通过 24 个独立模拟平台场景，
-新增标准服务查询与签名配额闭环。H2 测试覆盖绝对更新、同版/旧版、降额/撤销、真实零与缺失、窗口、并发、隔离和重启，
+验证：Java 17 `mvn -o verify` 通过 73 项测试，0 失败/错误/跳过；两个 Java 17 可执行服务共通过 24 个独立模拟平台场景，
+覆盖资源目录、标准服务查询与签名额度/功能配置。H2 测试覆盖绝对更新、同版/旧版、降额/撤销、真实零与缺失、窗口、并发、隔离和重启，
+并验证资源功能撤销、独立于用量的限制、完整快照必填与整批原子保存。
 高精度参数经过通用 JSON 树解码仍保持 BigDecimal。共享前端 lint、typecheck/build、核心依赖边界及 Java 格式/空白检查通过。
-日志：`/private/tmp/application-standard-commands-sdk-final.log`、`/private/tmp/application-standard-commands-e2e-final.log`、
-`/private/tmp/application-standard-commands-ui.log`。旧 CI 的 HTTP 取消测试在断连传播前立即断言，已改为在释放服务端前有界等待；
-定向 HTTP 测试 7 项及取消场景连续 5 次通过，日志为 `/private/tmp/application-sdk-http-cancel-final.log`、
-`/private/tmp/application-sdk-http-cancel-repeat.log`，不重复累计进 72 项。
+日志：`/private/tmp/tenant-resource-foundation-sdk.log`、`/private/tmp/tenant-resource-foundation-e2e.log`、
+`/private/tmp/tenant-resource-foundation-ui-build.log`、`/private/tmp/tenant-resource-foundation-ui-lint.log`。
+旧 CI 的 HTTP 取消测试在断连传播前立即断言，已改为在释放服务端前有界等待；
+前期定向 HTTP 测试 7 项及取消场景连续 5 次通过，日志为 `/private/tmp/application-sdk-http-cancel-final.log`、
+`/private/tmp/application-sdk-http-cancel-repeat.log`，不重复累计进 73 项。
 未连接真实平台、未发布制品；沿用 [PR #15](https://github.com/jetlinks/jetlinks-api-sdk/pull/15)，配套
 [组件 #1638](https://github.com/jetlinks-v2/jetlinks-components/pull/1638)、
 [认证 #359](https://github.com/jetlinks-v2/authentication-manager/pull/359) 与

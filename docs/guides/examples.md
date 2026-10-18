@@ -65,7 +65,9 @@ curl -X POST http://127.0.0.1:19090/__fixture/command \
 API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（例如 `/jetlinks/events/api-prod`）。业务模板通知地址使用 `/jetlinks/events`，能力和命令地址分别为 `/api/capabilities`、`/api/commands/1/{commandId}`；平台配置 RSA 公钥，应用保管私钥。多个区域模板可共用同一套第三方应用，每个可信平台身份配置一条模板信任记录。
 
 两个 Java 服务共用五个标准命令：`GetServiceHealth` 实际检查示例数据库，`GetServiceInfo` 返回服务发布信息，
-`GetTenantMetrics` 声明 `example:requests` 周期配额指标，`ReadTenantUsage` 读取用量，`SaveTenantLimits` 保存完整快照。
+`GetTenantResources` 声明 `example` 资源，包含局部指标 `requests` 与资源功能 `use`；`ReadTenantUsage` 以完整
+`example:requests` 读取用量，`SaveTenantLimits` 原子保存 `{revision,limits,capabilities}` 完整快照，两个集合均须显式提供。
+`UseExampleResource` 同时检查额度与 `use` 功能，撤销功能保留已有用量，不能回退为无限额或自动重新授权。
 命令面板显示已验签的请求和结果，后续语言示例复用同一前端。
 
 通过模拟平台验证配额流程（命令入口如上文 `__fixture/command`）：

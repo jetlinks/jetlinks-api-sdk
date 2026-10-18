@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 class ExampleQuotaTest {
@@ -42,6 +43,10 @@ class ExampleQuotaTest {
         limit.limit = new BigDecimal(amount);
         limit.windowDurationMillis = 10000L;
         input.limits = List.of(limit);
+        input.capabilities =
+                List.of(
+                        new ResourceCapability(
+                                ExampleService.RESOURCE_ID, Set.of(ExampleService.USE_CAPABILITY)));
         return input;
     }
 
@@ -80,6 +85,7 @@ class ExampleQuotaTest {
         SaveTenantLimits revoke = new SaveTenantLimits();
         revoke.revision = 2L;
         revoke.limits = List.of();
+        revoke.capabilities = List.of();
         store.saveLimits(app, revoke).block();
         assertTrue(store.usage(app, new ReadTenantUsage()).collectList().block().isEmpty());
         assertThrows(SdkException.class, () -> store.useResource(app, BigDecimal.ONE).block());
@@ -135,11 +141,40 @@ class ExampleQuotaTest {
     @Test
     void typedCommandParametersRetainDecimalPrecisionThroughTreeDecode() {
         byte[] json =
-                "{\"revision\":1,\"limits\":[{\"metricId\":\"example:requests\",\"limit\":1.12345678901234567890123456789,\"windowDurationMillis\":10000}]}"
+                "{\"revision\":1,\"limits\":[{\"metricId\":\"example:requests\",\"limit\":1.12345678901234567890123456789,\"windowDurationMillis\":10000}],\"capabilities\":[{\"resource\":\"example\",\"capabilities\":[\"use\"]}]}"
                         .getBytes(StandardCharsets.UTF_8);
         var decoded = Json.convert(Json.parse(json), SaveTenantLimits.class);
         assertEquals(
                 new BigDecimal("1.12345678901234567890123456789"), decoded.limits.get(0).limit);
+        assertEquals(Set.of("use"), decoded.capabilities.get(0).capabilities);
+    }
+
+    @Test
+    void capabilitiesAreRequiredSavedAtomicallyAndRevokedIndependentlyOfUsage() {
+        var store = store();
+        var app = application("east", 1);
+        var initial = limits(1, "10");
+        initial.capabilities = null;
+        assertThrows(SdkException.class, () -> store.saveLimits(app, initial).block());
+        store.saveLimits(app, limits(1, "10")).block();
+        store.useResource(app, BigDecimal.ONE).block();
+
+        var invalid = limits(2, "20");
+        invalid.capabilities =
+                List.of(new ResourceCapability(ExampleService.RESOURCE_ID, Set.of("unknown")));
+        assertThrows(SdkException.class, () -> store.saveLimits(app, invalid).block());
+        assertEquals(1, store.saveLimits(app, limits(1, "10")).block().revision);
+
+        var revoked = limits(2, "10");
+        revoked.capabilities = List.of();
+        store.saveLimits(app, revoked).block();
+        assertEquals(BigDecimal.ONE, usage(store, app).usage);
+        assertThrows(SdkException.class, () -> store.useResource(app, BigDecimal.ONE).block());
+        var restarted = store();
+        assertEquals(2, restarted.saveLimits(app, limits(1, "10")).block().revision);
+        assertThrows(SdkException.class, () -> restarted.useResource(app, BigDecimal.ONE).block());
+        store.saveLimits(app, limits(3, "10")).block();
+        assertEquals(new BigDecimal("2"), store.useResource(app, BigDecimal.ONE).block().usage);
     }
 
     @Test

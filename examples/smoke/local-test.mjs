@@ -181,9 +181,12 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       }
       const health = await command('GetServiceHealth'); assert.equal(health.status, 'UP');
       const info = await command('GetServiceInfo'); assert.equal(info.name, 'JetLinks Java Example');
-      const metrics = await command('GetTenantMetrics', {}, 'east', true);
-      assert.equal(metrics[0].id, 'example:requests'); assert.equal(metrics[0].limitType, 'quotaTimeLimit');
-      const snapshot = (revision, limit) => ({ revision, limits: [{ metricId: 'example:requests', limit, windowDurationMillis: 86400000 }] });
+      const resources = await command('GetTenantResources', {}, 'east', true);
+      assert.equal(resources[0].id, 'example');
+      assert.equal(resources[0].metrics[0].id, 'requests');
+      assert.equal(resources[0].metrics[0].limitType, 'quotaTimeLimit');
+      assert.equal(resources[0].capabilities[0].id, 'use');
+      const snapshot = (revision, limit) => ({ revision, limits: [{ metricId: 'example:requests', limit, windowDurationMillis: 86400000 }], capabilities: [{ resource: 'example', capabilities: ['use'] }] });
       assert.equal((await command('SaveTenantLimits', snapshot(1, 10))).revision, 1);
       assert.equal((await command('UseExampleResource', { amount: 4 })).usage, 4);
       assert.equal((await command('SaveTenantLimits', snapshot(2, 3))).revision, 2);
@@ -192,12 +195,16 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       assert.equal((await command('SaveTenantLimits', snapshot(1, 100))).revision, 2);
       assert.equal((await command('ReadTenantUsage', {}, 'east', true))[0].usage, 4);
       assert.deepEqual(await command('ReadTenantUsage', {}, 'west', true), []);
-      assert.equal((await command('SaveTenantLimits', { revision: 3, limits: [] })).revision, 3);
+      assert.equal((await command('SaveTenantLimits', { revision: 3, limits: [], capabilities: [] })).revision, 3);
       assert.deepEqual(await command('ReadTenantUsage', {}, 'east', true), []);
       assert.equal((await command('SaveTenantLimits', snapshot(4, -1))).revision, 4);
       assert.equal((await command('UseExampleResource', { amount: 100 })).usage, 104);
       // 同版重试模拟第三方已保存而平台未收到上次响应，不重复改变额度或用量。
       assert.equal((await command('SaveTenantLimits', snapshot(4, -1))).revision, 4);
+      const capabilityRevoked = snapshot(5, -1); capabilityRevoked.capabilities = [];
+      assert.equal((await command('SaveTenantLimits', capabilityRevoked)).revision, 5);
+      const denied = await fixture.command('east', 'UseExampleResource', { amount: 1 });
+      assert.equal(denied.status, 500); await denied.text();
       assert.equal((await command('ReadTenantUsage', {}, 'east', true))[0].usage, 104);
     });
     await scenario('HTTP stream cancellation propagates to platform', async () => {

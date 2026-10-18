@@ -86,9 +86,13 @@ public final class ExampleStore implements NotificationStore {
 
     private synchronized SaveTenantLimits.Result saveLimitsNow(
             ApplicationState application, SaveTenantLimits input) throws SQLException {
-        if (input.revision == null || input.revision < 0 || input.limits == null) {
+        if (input.revision == null
+                || input.revision < 0
+                || input.limits == null
+                || input.capabilities == null) {
             throw new SdkException(
-                    Code.INVALID_ARGUMENT, "revision and complete limits are required");
+                    Code.INVALID_ARGUMENT,
+                    "revision, complete limits and capabilities are required");
         }
         List<SaveTenantLimits.Limit> limits = new ArrayList<>();
         for (SaveTenantLimits.Limit limit : input.limits) {
@@ -108,11 +112,26 @@ public final class ExampleStore implements NotificationStore {
             normalized.windowDurationMillis = limit.windowDurationMillis;
             limits.add(normalized);
         }
+        List<ResourceCapability> capabilities = new ArrayList<>();
+        for (ResourceCapability capability : input.capabilities) {
+            if (capability == null
+                    || !ExampleService.RESOURCE_ID.equals(capability.resource)
+                    || capability.capabilities == null
+                    || !Set.of(ExampleService.USE_CAPABILITY).containsAll(capability.capabilities)
+                    || !capabilities.isEmpty()) {
+                throw new SdkException(
+                        Code.INVALID_ARGUMENT, "Invalid example resource capability");
+            }
+            capabilities.add(
+                    new ResourceCapability(
+                            capability.resource, Set.copyOf(capability.capabilities)));
+        }
         try (Connection c = connection()) {
             QuotaState state = quota(c, application);
             if (input.revision > state.revision) {
                 state.revision = input.revision;
                 state.limits = limits;
+                state.capabilities = capabilities;
                 // 仅替换额度配置，绝不清零用量或改变已记录的统计窗口。
                 saveQuota(c, application, state);
             }
@@ -155,6 +174,15 @@ public final class ExampleStore implements NotificationStore {
             QuotaState state = quota(c, application);
             if (state.limits.isEmpty()) {
                 throw new SdkException(Code.LIMIT_EXCEEDED, "Example quota is not granted");
+            }
+            if (state.capabilities.stream()
+                    .noneMatch(
+                            capability ->
+                                    ExampleService.RESOURCE_ID.equals(capability.resource)
+                                            && capability.capabilities.contains(
+                                                    ExampleService.USE_CAPABILITY))) {
+                throw new SdkException(
+                        Code.INVALID_STATE, "Example resource capability is not granted");
             }
             long now = clock.getAsLong();
             TenantUsage snapshot = snapshot(state, now);
@@ -219,6 +247,7 @@ public final class ExampleStore implements NotificationStore {
     private static class QuotaState {
         public long revision = -1;
         public List<SaveTenantLimits.Limit> limits = new ArrayList<>();
+        public List<ResourceCapability> capabilities = new ArrayList<>();
         public BigDecimal usage = BigDecimal.ZERO;
         public long windowStart = -1;
     }

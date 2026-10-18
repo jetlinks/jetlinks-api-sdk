@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 当前可信平台与应用的完整受管配额快照，省略的旧受管项撤销，空列表撤销全部。 设置绝对上限并保留已有用量，不能用来充值、重置用量或删除业务数据。
+ * 当前可信平台与应用的完整受管额度和资源能力快照，两个列表均须显式提供，省略的旧受管项撤销。 设置绝对上限并保留已有用量，不能用来充值、重置用量或删除业务数据。
  * 处理器须原子保存快照和版本；同版本幂等，旧版本不能覆盖，并返回当前版本。
  *
  * @since 2.0
@@ -15,6 +15,9 @@ public class SaveTenantLimits {
 
     /** 必须显式提供完整列表，null 不表示撤销。 */
     public List<Limit> limits;
+
+    /** 完整受管资源功能集合，空列表撤销全部；与 HTTP 命令能力清单无关。 */
+    public List<ResourceCapability> capabilities;
 
     /** 单个指标的绝对额度配置。 @since 2.0 */
     public static class Limit {

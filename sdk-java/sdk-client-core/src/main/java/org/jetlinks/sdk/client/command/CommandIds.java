@@ -4,7 +4,7 @@ package org.jetlinks.sdk.client.command;
 public final class CommandIds {
     public static final String GET_SERVICE_HEALTH = "GetServiceHealth";
     public static final String GET_SERVICE_INFO = "GetServiceInfo";
-    public static final String GET_TENANT_METRICS = "GetTenantMetrics";
+    public static final String GET_TENANT_RESOURCES = "GetTenantResources";
     public static final String READ_TENANT_USAGE = "ReadTenantUsage";
     public static final String SAVE_TENANT_LIMITS = "SaveTenantLimits";
 

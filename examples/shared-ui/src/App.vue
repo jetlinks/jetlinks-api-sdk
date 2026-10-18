@@ -81,7 +81,7 @@ onUnmounted(()=>{abort?.abort();if(timer)clearInterval(timer)})
    </a-tab-pane>
    <a-tab-pane key="commands" tab="命令服务">
     <div class="toolbar"><a-button :disabled="!app" @click="run(async()=>{commands=await api(endpoint+'/commands')})">刷新调用记录</a-button><span class="muted">在平台模板中将 api.address 指向本服务 /api</span></div>
-    <JsonPanel :value="commands ?? '等待平台调用 GetServiceHealth、GetServiceInfo、GetTenantMetrics、ReadTenantUsage 或 SaveTenantLimits'" title="平台真实入站命令"/>
+    <JsonPanel :value="commands ?? '等待平台调用 GetServiceHealth、GetServiceInfo、GetTenantResources、ReadTenantUsage 或 SaveTenantLimits'" title="平台真实入站命令"/>
    </a-tab-pane>
   </a-tabs>
  </div>
