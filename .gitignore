@@ -9,3 +9,10 @@ data/
 example.local.json
 .playwright-cli/
 output/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.tgz

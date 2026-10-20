@@ -7,6 +7,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.handler.codec.http.HttpMethod;
 
 import org.jetlinks.sdk.client.SdkException.Code;
+import org.jetlinks.sdk.client.auth.OAuth2;
 import org.jetlinks.sdk.client.internal.*;
 import org.jetlinks.sdk.client.model.Page;
 
@@ -27,6 +28,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @since 2.0
  */
 public final class JetLinksReactiveClient implements AutoCloseable {
+    /** 使用本地签名机器 Token，无需自行装配认证缓存；有效期须与平台一致。 */
+    public static JetLinksReactiveClient local(String base, String key, String secret) {
+        return new JetLinksReactiveClient(
+                base, OAuth2.localTokens(key, secret, null, Duration.ofMinutes(2)));
+    }
+
     private final String base;
     private final TokenProvider auth;
     private final HttpClient http;

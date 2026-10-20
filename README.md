@@ -1,12 +1,18 @@
 # JetLinks Client SDK 2.0
 
-独立 Java 17 SDK，支持 API 应用和第三方业务应用接入。核心只依赖 Reactor Netty、Jackson 等通用库，不依赖 JetLinks 平台、hsweb 或 Spring。
+Java、Node.js、Python 客户端，支持 API 应用和第三方业务应用接入，不依赖 JetLinks 平台或 hsweb。
+
+| 语言 | 运行环境 | 接入入口 |
+| --- | --- | --- |
+| Java | Java 17 / Spring Boot 3.5 | [Java 指南](docs/guides/java-sdk.md) |
+| Node.js | Node.js 22+，示例需 22.13+ | [Node.js 指南](sdk-nodejs/README.md) |
+| Python | Python 3.11+ | [Python 指南](sdk-python/README.md) |
 
 - 同步 `JetLinksClient`、响应式 `JetLinksReactiveClient` 共用协议与认证。
 - OAuth2、本地签名机器 Token、已有 Bearer Token。
 - 通知验签、持久受理扩展、多区域生命周期与凭据管理。
 - 授权码登录、成员/角色/授权事实、API 应用订阅、第三方 JSON/NDJSON 命令。
-- 可运行的 Netty、Spring Boot Example，共用同一个前端。
+- 可运行的 Netty、Spring Boot、Node.js、Python Example，共用同一个前端。
 
 ## 快速调用
 
@@ -21,15 +27,9 @@
 ```java
 import org.jetlinks.sdk.client.ApiRequest;
 import org.jetlinks.sdk.client.JetLinksClient;
-import org.jetlinks.sdk.client.auth.CachedTokenProvider;
-import org.jetlinks.sdk.client.auth.OAuth2;
 import org.jetlinks.sdk.client.model.AuthorizationContext;
 
-import java.time.Duration;
-
-CachedTokenProvider tokens =
-    OAuth2.localTokens(accessKey, accessSecret, null, Duration.ofMinutes(2));
-try (JetLinksClient client = new JetLinksClient(apiBaseUrl, tokens)) {
+try (JetLinksClient client = JetLinksClient.local(apiBaseUrl, accessKey, accessSecret)) {
     AuthorizationContext context = client.request(
         ApiRequest.get("/authorize/context"), AuthorizationContext.class);
 }
@@ -39,7 +39,8 @@ try (JetLinksClient client = new JetLinksClient(apiBaseUrl, tokens)) {
 
 ## 运行 Example
 
-需要 JDK 17+、Maven 3.6.3+、Node.js 20+。从仓库根目录执行：
+Java 示例需要 JDK 17+、Maven 3.6.3+；Node.js 示例需要 22.13+，Python 示例需要 3.11+。
+所有示例共用的前端与模拟平台使用 Node.js。从仓库根目录执行：
 
 ```sh
 npm --prefix examples/shared-ui ci
@@ -59,6 +60,10 @@ node examples/smoke/platform-fixture.mjs
 java -jar sdk-java/examples/plain-java/target/sdk-client-example-java-2.0.0-SNAPSHOT.jar example.local.json
 # 或使用 Spring Boot（两者默认端口相同，选择一个运行）
 java -Dexample.config=example.local.json -jar sdk-java/examples/spring-boot/target/sdk-client-example-spring-boot-2.0.0-SNAPSHOT.jar
+# 或 Node.js（先 npm --prefix sdk-nodejs ci && npm --prefix sdk-nodejs run build）
+node sdk-nodejs/examples/server.mjs example.local.json
+# 或 Python（先在虚拟环境 pip install -e 'sdk-python[example]'）
+sdk-python/.venv/bin/python sdk-python/examples/server.py example.local.json
 ```
 
 模拟首次业务应用通知：
@@ -71,7 +76,7 @@ curl -X POST http://127.0.0.1:19090/__fixture/notify \
 
 页面可查看应用、执行请求、通知详情、登录、授权事实、订阅和命令。模拟平台返回的业务 API 前缀为 `/gateway/east` 等；可在请求面板调用 `/fixture/echo`。
 
-自动启动模拟平台和两个 Example、执行完整场景并停止进程：
+安装各语言依赖后，自动启动模拟平台和四种 Example、执行同一套完整场景并停止进程：
 
 ```sh
 node examples/smoke/local-test.mjs
@@ -97,8 +102,8 @@ node examples/smoke/local-test.mjs
 | `examples/shared-ui` | 所有语言 Example 共用的 Vue 前端 |
 | `examples/contract/openapi.yaml` | Example 接口契约 |
 | `examples/smoke` | 独立模拟平台与公共场景验收 |
-| `sdk-python`、`sdk-nodejs` | 后续实现入口 |
+| `sdk-python`、`sdk-nodejs` | 独立语言 SDK、持久化真实服务示例 |
 
 [Java 接入指南](docs/guides/java-sdk.md) · [Example 配置与测试](docs/guides/examples.md) · [1.x 迁移](docs/guides/migration.md) · [开发与验收范围](docs/plans/java-sdk-2.0.md)
 
-`2.0` 是不兼容的主版本；未提供旧版 `ApiClient`/hsweb DSL 兼容层。当前版本尚未发布到 Maven Central。
+`2.0` 是不兼容的主版本；未提供旧版 `ApiClient`/hsweb DSL 兼容层。当前制品尚未发布到 Maven/npm/PyPI，请按语言指南从源码安装。

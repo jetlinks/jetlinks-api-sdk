@@ -1,22 +1,29 @@
 # Example 配置与验证
 
-两个 Java 服务共用 `example-common` 的业务流程和 H2 存储，同一份 `examples/shared-ui/dist` 提供页面。未来 Python/Node.js 只需实现 `examples/contract/openapi.yaml`，不复制前端。
+两个 Java 服务共用 `example-common` 和 H2；Node.js、Python 各自调用本语言 SDK，使用示例层 SQLite。
+四种服务实现同一份 `examples/contract/openapi.yaml`，托管唯一的 `examples/shared-ui/dist`，配置结构相同。
 
 ## 本地完整验证
 
-从根目录执行（JDK 17+、Maven 3.6.3+、Node.js 20+）：
+从根目录执行（JDK 17+、Maven 3.6.3+、Node.js 22.13+、Python 3.11+）：
 
 ```sh
 npm --prefix examples/shared-ui ci
 npm --prefix examples/shared-ui run typecheck
 npm --prefix examples/shared-ui run lint
 npm --prefix examples/shared-ui run build
+npm --prefix sdk-nodejs ci
+npm --prefix sdk-nodejs test
+python3.11 -m venv sdk-python/.venv
+sdk-python/.venv/bin/pip install -e 'sdk-python[example,test]'
+sdk-python/.venv/bin/python -m pytest sdk-python/tests
 mvn verify
 python3 tools/check-dependencies.py
 node examples/smoke/local-test.mjs
 ```
 
-最后一条命令启动独立 Node 模拟平台，再分别启动两个可执行 Java JAR；每个服务独立数据库和端口。通过实际 HTTP 验证两类应用、OAuth2/本地 Token、同步/响应式、登录、通知、订阅、授权事实、命令、取消和重启恢复，结束时停止进程。可用 `EXAMPLE_KINDS=plain-java` 或 `spring-boot` 缩小范围。
+最后一条命令启动独立 Node 模拟平台，再分别启动四种服务；每个服务独立数据库和端口。通过实际 HTTP 验证两类应用、OAuth2/本地 Token、原生调用模式、登录、通知、订阅、授权事实、命令、取消和重启恢复，结束时停止进程。
+可用 `EXAMPLE_KINDS=plain-java,spring-boot,nodejs,python` 选择一项或多项；`PYTHON` 可指定已安装示例依赖的解释器，默认 `sdk-python/.venv/bin/python`。
 
 模拟平台独立实现签名和 Token 验证，使用合成密钥，不导入 Java SDK。控制端点仅监听本机，不能部署为公开服务。模拟目录、私钥及配置均为运行产物。
 
@@ -64,7 +71,7 @@ curl -X POST http://127.0.0.1:19090/__fixture/command \
 
 API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（例如 `/jetlinks/events/api-prod`）。业务模板通知地址使用 `/jetlinks/events`，能力和命令地址分别为 `/api/capabilities`、`/api/commands/1/{commandId}`；平台配置 RSA 公钥，应用保管私钥。多个区域模板可共用同一套第三方应用，每个可信平台身份配置一条模板信任记录。
 
-两个 Java 服务共用五个标准命令：`GetServiceHealth` 实际检查示例数据库，`GetServiceInfo` 返回服务发布信息，
+各语言服务共用五个标准命令：`GetServiceHealth` 实际检查示例数据库，`GetServiceInfo` 返回服务发布信息，
 `GetTenantResources` 声明 `example` 资源，包含局部指标 `requests` 与资源功能 `use`；`ReadTenantUsage` 以完整
 `example:requests` 读取用量，`SaveTenantLimits` 原子保存 `{revision,limits,capabilities}` 完整快照，两个集合均须显式提供。
 `UseExampleResource` 同时检查额度与 `use` 功能，撤销功能保留已有用量，不能回退为无限额或自动重新授权。
@@ -72,7 +79,7 @@ API 应用订阅的 HTTP 地址使用应用面板返回的 `notificationUrl`（�
 
 通过模拟平台验证配额流程（命令入口如上文 `__fixture/command`）：
 
-1. `SaveTenantLimits` 发送 `{"revision":1,"limits":[{"metricId":"example:requests","limit":10,"windowDurationMillis":86400000}]}`。
+1. `SaveTenantLimits` 发送 `{"revision":1,"limits":[{"metricId":"example:requests","limit":10,"windowDurationMillis":86400000}],"capabilities":[{"resource":"example","capabilities":["use"]}]}`。
 2. 示例业务命令 `UseExampleResource` 发送 `{"amount":4}`，返回用量 4；`ReadTenantUsage` 重复读取仍为 4。
 3. revision 2 将上限改为 3，已有用量仍为 4，继续使用失败；迟到的 revision 1 不覆盖当前配置。
 4. 新版本发送 `limits:[]` 撤销，使用失败；新版本重新授权时保留同窗口用量。
@@ -118,4 +125,4 @@ npm --prefix examples/shared-ui run dev
 EXAMPLE_URL=http://127.0.0.1:8090 node --test examples/smoke/smoke.test.mjs
 ```
 
-两个 Java 服务使用本地模拟平台各通过 11 个场景，共 22 项，包含仅带 code/state 的标准授权回调、无待登录 Cookie、state/平台入口标识篡改及回调重放检查。真实平台的权限分配、网络入口和实际事件源仍需在目标环境按上述流程验收。
+共同场景包含仅带 code/state 的标准授权回调、无待登录 Cookie、state/平台入口标识篡改及回调重放检查。真实平台的权限分配、网络入口和实际事件源仍需在目标环境按上述流程验收。

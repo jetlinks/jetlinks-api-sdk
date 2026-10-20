@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 
 import org.jetlinks.sdk.client.*;
+import org.jetlinks.sdk.client.ApplicationClients.Handle;
 import org.jetlinks.sdk.client.SdkException.Code;
 import org.jetlinks.sdk.client.auth.*;
 import org.jetlinks.sdk.client.command.*;
@@ -24,6 +25,7 @@ import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.LongSupplier;
 
 /**
  * 共用的真实接入示例流程，两种 HTTP 启动方式都委托此类，平台协议统一使用 sdk-client-core。
@@ -40,18 +42,23 @@ public final class ExampleService implements AutoCloseable {
     public final ExampleStore store;
     private final NotificationVerifier verifier;
     private final CommandService commands;
-    private final Map<String, Handle> clients = new ConcurrentHashMap<>();
+    private final ApplicationClients clients = new ApplicationClients();
     private final Map<String, SnapshotSynchronizer<AuthorizationSnapshot>> synchronizers =
             new ConcurrentHashMap<>();
     private final Set<String> dirty = ConcurrentHashMap.newKeySet();
-    private final Map<String, PendingLogin> pending = new ConcurrentHashMap<>();
+    private final PendingLogins<PendingLogin> pending;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Deque<ObjectNode> commandRecords = new ArrayDeque<>();
     private Disposable worker;
     private volatile String syncStatus = "idle";
 
     public ExampleService(ExampleConfig config) {
+        this(config, System::currentTimeMillis);
+    }
+
+    ExampleService(ExampleConfig config, LongSupplier clock) {
         this.config = config;
+        pending = new PendingLogins<>(128, 600000, clock);
         store = new ExampleStore(config.database, config::privateKey);
         verifier = new NotificationVerifier(this::resolveKey);
         commands =
@@ -317,6 +324,14 @@ public final class ExampleService implements AutoCloseable {
                                     "java",
                                     "sdkVersion",
                                     "2.0.0-SNAPSHOT",
+                                    "clientModes",
+                                    List.of(
+                                            map(
+                                                    "value",
+                                                    "reactive",
+                                                    "label",
+                                                    "JetLinksReactiveClient"),
+                                            map("value", "sync", "label", "JetLinksClient")),
                                     "features",
                                     Arrays.asList(
                                             "requests",
@@ -419,18 +434,17 @@ public final class ExampleService implements AutoCloseable {
                                                                                         .equals(
                                                                                                 stateIdentity(
                                                                                                         after))) {
-                                                                                    clients.entrySet()
-                                                                                            .removeIf(
-                                                                                                    entry -> {
-                                                                                                        if (!entry.getKey()
-                                                                                                                .startsWith(
-                                                                                                                        id
-                                                                                                                                + ":"))
-                                                                                                            return false;
-                                                                                                        entry.getValue()
-                                                                                                                .close();
-                                                                                                        return true;
-                                                                                                    });
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id);
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id
+                                                                                                            + ":user");
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id
+                                                                                                            + ":management");
                                                                                     synchronizers
                                                                                             .remove(
                                                                                                     id);
@@ -690,19 +704,18 @@ public final class ExampleService implements AutoCloseable {
                             400,
                             "Configure a platform userToken to run the signed-in platform"
                                     + " authorization step"));
-        if (pending.size() > 128)
-            pending.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
-        if (pending.size() >= 128)
-            return Mono.just(ExampleResponse.error(429, "Too many pending logins"));
         OAuth2 oauth = new OAuth2(state.apiBaseUrl, state.accessKey, state.accessSecret, true);
         String redirect =
                 config.publicBaseUrl.replaceAll("/+$", "") + "/example-api/login/callback";
         OAuth2.Authorization auth = oauth.authorization(redirect, null);
-        String cookie = UUID.randomUUID().toString();
         // 原始平台入口用于协议演示；生产登录建议统一走带 state/PKCE 的授权。
         boolean platform = input.entry.equals("platform");
         PendingLogin flow = new PendingLogin(context, state.copy(), auth, platform);
-        pending.put(cookie, flow);
+        String cookie = pending.add(flow);
+        if (cookie == null) {
+            oauth.close();
+            return Mono.just(ExampleResponse.error(429, "Too many pending logins"));
+        }
         ApiRequest request =
                 platform
                         ? ApiRequest.get(
@@ -723,7 +736,13 @@ public final class ExampleService implements AutoCloseable {
                         ? user.request(request, ApplicationRedirect.class)
                                 .map(result -> result.location)
                         : user.request(request, String.class);
-        return location.map(
+        return location.switchIfEmpty(
+                        Mono.error(
+                                () ->
+                                        new SdkException(
+                                                Code.INVALID_STATE,
+                                                "Missing authorization redirect")))
+                .map(
                         address -> {
                             return new ExampleResponse(
                                     200,
@@ -739,6 +758,8 @@ public final class ExampleService implements AutoCloseable {
                         })
                 .doFinally(
                         s -> {
+                            // 未向浏览器交付跳转地址时，不保留无法完成的登录预留。
+                            if (s != SignalType.ON_COMPLETE) pending.discard(cookie);
                             user.close();
                             oauth.close();
                         });
@@ -756,10 +777,8 @@ public final class ExampleService implements AutoCloseable {
 
     private Mono<ExampleResponse> callback(
             Map<String, String> query, Map<String, List<String>> headers) {
-        PendingLogin flow = pending.remove(cookie(headers, "jl-pending"));
-        if (flow == null
-                || flow.expires < System.currentTimeMillis()
-                || !flow.platform && !flow.auth.state.equals(query.get("state")))
+        PendingLogin flow = pending.take(cookie(headers, "jl-pending"));
+        if (flow == null || !flow.platform && !flow.auth.state.equals(query.get("state")))
             return Mono.error(() -> new SdkException(Code.AUTHENTICATION, "Invalid login state"));
         // 标准授权只保证 code/state，应用身份由已绑定浏览器的待登录记录确定。
         // 平台 _redirect 才追加来源和应用参数，须与本次发起记录一致。
@@ -843,59 +862,23 @@ public final class ExampleService implements AutoCloseable {
     }
 
     private Handle client(String context, ApplicationState state, String mode) {
-        if (!state.active())
-            throw new SdkException(
-                    Code.INVALID_ARGUMENT, "Application is inactive or credentials are missing");
-        if (clients.size() >= 128 && !clients.containsKey(context + ":" + mode))
-            throw new SdkException(Code.LIMIT_EXCEEDED, "Example client capacity reached");
-        String fingerprint =
-                Signatures.sha256(
-                        Json.bytes(
-                                Arrays.asList(
-                                        state.apiBaseUrl,
-                                        state.accessKey,
-                                        state.accessSecret,
-                                        state.keyRevision,
-                                        mode)));
-        return clients.compute(
-                context + ":" + mode,
-                (k, old) -> {
-                    if (old != null && old.fingerprint.equals(fingerprint)) return old;
-                    if (old != null) old.close();
-                    OAuth2 oauth = null;
-                    CachedTokenProvider provider = null;
-                    TokenProvider auth;
-                    if ("management".equals(mode))
-                        auth =
-                                TokenProvider.bearer(
-                                        Objects.requireNonNull(managementToken(context)));
-                    else if ("user".equals(mode))
-                        auth =
-                                TokenProvider.bearer(
-                                        Objects.requireNonNull(userToken(context, state)));
-                    else if ("local".equals(mode))
-                        auth =
-                                provider =
-                                        OAuth2.localTokens(
-                                                state.accessKey,
-                                                state.accessSecret,
-                                                null,
-                                                Duration.ofMinutes(2));
-                    else if ("oauth2".equals(mode)) {
-                        oauth =
-                                new OAuth2(
-                                        state.apiBaseUrl,
-                                        state.accessKey,
-                                        state.accessSecret,
-                                        true);
-                        auth = provider = oauth.machineTokens(null);
-                    } else throw new SdkException(Code.INVALID_ARGUMENT, "Unknown authMode");
-                    return new Handle(
-                            fingerprint,
-                            new JetLinksReactiveClient(state.apiBaseUrl, auth),
-                            oauth,
-                            provider);
-                });
+        if ("management".equals(mode) || "user".equals(mode)) {
+            String token =
+                    "management".equals(mode)
+                            ? managementToken(context)
+                            : userToken(context, state);
+            return clients.get(
+                    context + ":" + mode,
+                    state,
+                    ApplicationClients.Mode.BEARER,
+                    null,
+                    Objects.requireNonNull(token));
+        }
+        ApplicationClients.Mode authMode;
+        if ("local".equals(mode)) authMode = ApplicationClients.Mode.LOCAL;
+        else if ("oauth2".equals(mode)) authMode = ApplicationClients.Mode.OAUTH2;
+        else throw new SdkException(Code.INVALID_ARGUMENT, "Unknown authMode");
+        return clients.get(context, state, authMode);
     }
 
     private String stateIdentity(ApplicationState s) {
@@ -1064,27 +1047,7 @@ public final class ExampleService implements AutoCloseable {
 
     public void close() {
         if (worker != null) worker.dispose();
-        clients.values().forEach(Handle::close);
-        clients.clear();
-    }
-
-    private static final class Handle implements AutoCloseable {
-        final String fingerprint;
-        final JetLinksReactiveClient client;
-        final OAuth2 oauth;
-        final CachedTokenProvider provider;
-
-        Handle(String f, JetLinksReactiveClient c, OAuth2 o, CachedTokenProvider p) {
-            fingerprint = f;
-            client = c;
-            oauth = o;
-            provider = p;
-        }
-
-        public void close() {
-            client.close();
-            if (oauth != null) oauth.close();
-        }
+        clients.close();
     }
 
     private static final class PendingLogin {
@@ -1092,7 +1055,6 @@ public final class ExampleService implements AutoCloseable {
         final ApplicationState state;
         final OAuth2.Authorization auth;
         final boolean platform;
-        final long expires = System.currentTimeMillis() + 600000;
 
         PendingLogin(String c, ApplicationState s, OAuth2.Authorization a, boolean p) {
             context = c;

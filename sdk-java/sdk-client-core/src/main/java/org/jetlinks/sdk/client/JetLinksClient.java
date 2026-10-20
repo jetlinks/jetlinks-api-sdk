@@ -17,6 +17,11 @@ import java.util.stream.Stream;
  * @since 2.0
  */
 public final class JetLinksClient implements AutoCloseable {
+    /** 使用本地签名机器 Token 完成普通接入。 */
+    public static JetLinksClient local(String base, String key, String secret) {
+        return new JetLinksClient(JetLinksReactiveClient.local(base, key, secret));
+    }
+
     private final JetLinksReactiveClient reactive;
     private final Duration timeout;
 
