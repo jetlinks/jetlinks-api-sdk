@@ -17,7 +17,7 @@ jobs:
         with: {distribution: temurin, java-version: '17', cache: maven}
       - uses: actions/setup-node@v4
         with: {node-version: '22', cache: npm, cache-dependency-path: examples/shared-ui/package-lock.json}
-      - run: npm ci && npm run typecheck && npm run lint && npm run build
+      - run: npm ci && npm test && npm run typecheck && npm run lint && npm run build
         working-directory: examples/shared-ui
       - run: mvn -B package -DskipTests
       - run: node examples/smoke/local-test.mjs

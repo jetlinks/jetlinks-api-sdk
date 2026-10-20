@@ -31,6 +31,10 @@
 
 ## 接入实现收敛
 
+示例状态修复已实现：`PendingLogins` 统一拥有待登录记录的 TTL、单次消费和原子容量预留，授权失败、取消或缺少跳转结果时释放名额，成功登录等待回调。共享前端 `requestScope.ts` 按操作管理当前请求，应用切换时取消全部旧请求；普通请求和 NDJSON 均传递 AbortSignal，迟到结果、错误、诊断、通知详情和登录跳转不能更新新上下文，旧请求结束也不能清掉新请求的加载状态。范围限 Java 共用示例和共享前端，不改变 SDK 核心、签名协议或平台配置。
+
+集中验证：`mvn -o -pl sdk-java/examples/example-common -am test -Dtest=PendingLoginsTest,ExampleLoginTest,ExampleIntegrationTest,ExampleQuotaTest -Dsurefire.failIfNoSpecifiedTests=false` 在 JDK 21 / release 17 下通过 16 项，0 失败/错误/跳过，包含真实 HTTP/H2 及可控时钟；覆盖 128 条全部过期后的恢复、失败/取消释放、并发容量上限和单次消费。共享前端 `npm test` 7 项、`npm run lint`、`npm run typecheck`、`npm run build` 通过；组件回归执行实际 setup 与 Vue 响应式逻辑，控制普通请求、流、诊断和通知详情的完成顺序。CI 已接入前端测试；本地未启动浏览器或连接生产平台，Java 17 运行时由 CI 验证。修复 PR 面向 `2.0`，原工作区未提交的多语言改动不在本次范围内。
+
 生命周期修复：复用 `application.createTime` 识别同 ID 应用的生命周期，`occurredAt` 只排序同一生命周期内的事实，凭据 revision 也仅在同一生命周期比较；创建通知保留平台实际启停状态。范围为 core 合并函数、现有通知夹具、示例和指南，不新增协议、状态字段或配置。集中验证同步先到、旧通知迟到、删除重建及停用创建，并审查平台创建时间、密钥维护和可靠投递边界。
 
 已按确认范围完成：示例仅从 `SnapshotSynchronizer.current()` 读取同步结果，应用状态变化时统一失效；生命周期地址沿用平台已有的 HTTP/HTTPS 规则，生产建议 HTTPS；未知顶层字段统一使用 `additionalProperties()`，公开事件上下文仍为 `StructuredEvent.extensions`。移除 `extensions()` 别名及额外的地址校验器，不新增功能、配置或兼容层。平台侧同步精简元数据缓存、生命周期载荷与身份复制。

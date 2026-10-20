@@ -24,6 +24,7 @@ import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.LongSupplier;
 
 /**
  * 共用的真实接入示例流程，两种 HTTP 启动方式都委托此类，平台协议统一使用 sdk-client-core。
@@ -44,14 +45,19 @@ public final class ExampleService implements AutoCloseable {
     private final Map<String, SnapshotSynchronizer<AuthorizationSnapshot>> synchronizers =
             new ConcurrentHashMap<>();
     private final Set<String> dirty = ConcurrentHashMap.newKeySet();
-    private final Map<String, PendingLogin> pending = new ConcurrentHashMap<>();
+    private final PendingLogins<PendingLogin> pending;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Deque<ObjectNode> commandRecords = new ArrayDeque<>();
     private Disposable worker;
     private volatile String syncStatus = "idle";
 
     public ExampleService(ExampleConfig config) {
+        this(config, System::currentTimeMillis);
+    }
+
+    ExampleService(ExampleConfig config, LongSupplier clock) {
         this.config = config;
+        pending = new PendingLogins<>(128, 600000, clock);
         store = new ExampleStore(config.database, config::privateKey);
         verifier = new NotificationVerifier(this::resolveKey);
         commands =
@@ -690,19 +696,18 @@ public final class ExampleService implements AutoCloseable {
                             400,
                             "Configure a platform userToken to run the signed-in platform"
                                     + " authorization step"));
-        if (pending.size() > 128)
-            pending.entrySet().removeIf(e -> e.getValue().expires < System.currentTimeMillis());
-        if (pending.size() >= 128)
-            return Mono.just(ExampleResponse.error(429, "Too many pending logins"));
         OAuth2 oauth = new OAuth2(state.apiBaseUrl, state.accessKey, state.accessSecret, true);
         String redirect =
                 config.publicBaseUrl.replaceAll("/+$", "") + "/example-api/login/callback";
         OAuth2.Authorization auth = oauth.authorization(redirect, null);
-        String cookie = UUID.randomUUID().toString();
         // 原始平台入口用于协议演示；生产登录建议统一走带 state/PKCE 的授权。
         boolean platform = input.entry.equals("platform");
         PendingLogin flow = new PendingLogin(context, state.copy(), auth, platform);
-        pending.put(cookie, flow);
+        String cookie = pending.add(flow);
+        if (cookie == null) {
+            oauth.close();
+            return Mono.just(ExampleResponse.error(429, "Too many pending logins"));
+        }
         ApiRequest request =
                 platform
                         ? ApiRequest.get(
@@ -723,7 +728,13 @@ public final class ExampleService implements AutoCloseable {
                         ? user.request(request, ApplicationRedirect.class)
                                 .map(result -> result.location)
                         : user.request(request, String.class);
-        return location.map(
+        return location.switchIfEmpty(
+                        Mono.error(
+                                () ->
+                                        new SdkException(
+                                                Code.INVALID_STATE,
+                                                "Missing authorization redirect")))
+                .map(
                         address -> {
                             return new ExampleResponse(
                                     200,
@@ -739,6 +750,8 @@ public final class ExampleService implements AutoCloseable {
                         })
                 .doFinally(
                         s -> {
+                            // 未向浏览器交付跳转地址时，不保留无法完成的登录预留。
+                            if (s != SignalType.ON_COMPLETE) pending.discard(cookie);
                             user.close();
                             oauth.close();
                         });
@@ -756,10 +769,8 @@ public final class ExampleService implements AutoCloseable {
 
     private Mono<ExampleResponse> callback(
             Map<String, String> query, Map<String, List<String>> headers) {
-        PendingLogin flow = pending.remove(cookie(headers, "jl-pending"));
-        if (flow == null
-                || flow.expires < System.currentTimeMillis()
-                || !flow.platform && !flow.auth.state.equals(query.get("state")))
+        PendingLogin flow = pending.take(cookie(headers, "jl-pending"));
+        if (flow == null || !flow.platform && !flow.auth.state.equals(query.get("state")))
             return Mono.error(() -> new SdkException(Code.AUTHENTICATION, "Invalid login state"));
         // 标准授权只保证 code/state，应用身份由已绑定浏览器的待登录记录确定。
         // 平台 _redirect 才追加来源和应用参数，须与本次发起记录一致。
@@ -1092,7 +1103,6 @@ public final class ExampleService implements AutoCloseable {
         final ApplicationState state;
         final OAuth2.Authorization auth;
         final boolean platform;
-        final long expires = System.currentTimeMillis() + 600000;
 
         PendingLogin(String c, ApplicationState s, OAuth2.Authorization a, boolean p) {
             context = c;
