@@ -1,5 +1,18 @@
 # Java SDK 2.0 开发任务
 
+## Node.js npm 发布
+
+通过 GitHub Actions 将 `@jetlinks/sdk-client` 发布到公开 npmjs，用户无需配置私有 registry 或 GitHub Token。
+入口为 `.github/workflows/npm-publish.yml`，仅接受与 `sdk-nodejs/package.json` 版本完全一致的 `node-v<version>` Tag；手动重试也必须选择该 Tag。
+`sdk-nodejs/tools/release.mjs` 校验规范 SemVer，拒绝分支、版本不一致和 npm 无法区分的 `+build` 元数据；预发布使用 `next`，稳定版使用 `latest`。
+构建任务执行 lint、测试并生成 tgz；独立发布任务以 OIDC 和 provenance 发布同一 tgz，禁用生命周期脚本，只有发布任务具有 `id-token: write` 权限。
+`sdk-nodejs/package.json` 补充公开 npm registry 与 repository 元数据；每次版本必须唯一，禁止覆盖已发布版本。Java/Nexus 发布保持独立。
+首次本地发布、npm Trusted Publisher 配置和后续 Tag 流程见 `sdk-nodejs/README.md` 的“维护者：发布到 npmjs”。
+
+本地验证：Node.js 22.22.2 下，lint、25 项测试、版本/渠道及 CLI 拒绝边界、actionlint 和空白检查通过；
+使用 npm 11.21.1 的 pack 与 publish dry-run 通过，18 个包文件仅含运行代码、声明、README 和包元数据；独立项目安装 tgz 后，运行时导入与严格 NodeNext TypeScript 编译通过。
+实际公开发布和 OIDC/provenance 尚未执行，需包负责人先完成 npm 首次发布，再配置 Trusted Publisher 并用新版本 Tag 验证。
+
 ## 资产范围便捷 API
 
 按已确认方案在 Java、Node.js、Python 客户端增加请求级 Scope 和不可变客户端视图。
