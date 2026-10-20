@@ -78,12 +78,12 @@ M01/M02 先完成并集中验证，再实现 M03/M04；M05 接入已有前端，
 
 ### 验证、风险与边界
 
-合并前已完成以下集中验证；本次将多语言优化与示例修复合入同一 PR，合并结果待统一重新验证 Java、前端、Node.js/Python 和四服务端到端场景：
+多语言优化与示例修复合并后，2026-10-20 已完成以下集中验证：
 
-- Java 17 `mvn -o verify`：75 项测试通过，0 失败/错误/跳过；`python3 tools/check-dependencies.py` 通过，core 不含 Spring/platform/hsweb 依赖。
+- `mvn -o verify`：82 项测试通过，0 失败/错误/跳过，包含登录过期恢复、失败/取消释放与客户端复用；本地使用 JDK 21 / release 17，CI 使用 Java 17。`python3 tools/check-dependencies.py` 和 Java AOSP 格式检查通过，core 不含 Spring/platform/hsweb 依赖。
 - Node.js `npm run lint`、`npm test`：格式、TypeScript 构建和 14 项测试通过；`npm pack` 成功，独立项目安装 tgz 后通过严格 TypeScript 编译和运行。
 - Python 3.11 Ruff 检查/格式、`pytest`：11 项测试通过；sdist/wheel 构建成功，独立虚拟环境安装 wheel 后可导入，精确小数和 `py.typed` 均正常。
-- 共享前端 lint、typecheck、build 通过；四种服务共用同一前端与 Example API，调用模式由 `/info` 声明。
+- 共享前端 `npm test` 7 项及 lint、typecheck、build 通过，覆盖实际组件的迟到响应、流、诊断、通知详情与登录跳转；四种服务共用同一前端与 Example API，调用模式由 `/info` 声明。
 - 仓库根目录运行 `node examples/smoke/local-test.mjs`，支持 `EXAMPLE_KINDS` 选择服务。本次 plain-java、spring-boot、nodejs、python 各通过 13 个公共场景，共 52 个；Java 同步/响应式、Python 同步/异步及 Node Promise/AsyncIterable 均实际调用。
 
 场景覆盖两类应用、多区域隔离、验签/篡改、首次信任、轮换/禁用/删除/重建、重复/乱序、重启去重、Token 并发刷新、
@@ -92,10 +92,12 @@ Node.js 额外验证超过 JS 安全整数的相邻凭据/配额版本保持顺�
 
 关键入口：`sdk-java/sdk-client-core/src/main/java/org/jetlinks/sdk/client/ApplicationClients.java`、`sdk-nodejs/src/`、`sdk-python/src/jetlinks_sdk_client/`、
 两种语言的 `examples/server.*` / `examples/store.*`、`examples/contract/vectors.json` 和 `examples/smoke/local-test.mjs`。
-当前验证日志为 `/private/tmp/jetlinks-multilang-java-current.log`、`/private/tmp/jetlinks-multilang-java-e2e-current.log`、
-`/private/tmp/jetlinks-multilang-node-e2e-current.log`、`/private/tmp/jetlinks-multilang-dynamic-final.log`、
-`/private/tmp/jetlinks-multilang-python-final.log` 和 `/private/tmp/jetlinks-multilang-ui-final.log`。
-npm/Python 独立制品安装结果见 `/private/tmp/jetlinks-multilang-node-install.log`、`/private/tmp/jetlinks-multilang-python-install.log`。
+合并后验证日志为 `/private/tmp/jetlinks-pr17-java.log`、`/private/tmp/jetlinks-pr17-ui.log`、
+`/private/tmp/jetlinks-pr17-node.log`、`/private/tmp/jetlinks-pr17-node-pack.log`、`/private/tmp/jetlinks-pr17-python.log`
+和 `/private/tmp/jetlinks-pr17-e2e.log`。npm 打包使用临时缓存绕过本机默认缓存权限问题，未改包配置。
+Node.js/Python 源码与此前独立安装验证的快照一致，复用 `/private/tmp/jetlinks-multilang-node-install.log`、
+`/private/tmp/jetlinks-multilang-python-install.log` 的安装证据；当前 tgz 的 JavaScript/类型声明及 wheel 的 `py.typed` 均已检查。
+实现提交：`1994add`（登录/请求隔离）、`99065d4`（多语言客户端与接入入口），统一交付至 [PR #17](https://github.com/jetlinks/jetlinks-api-sdk/pull/17)，目标 `2.0`。
 
 主要风险是跨语言数字精度、RSA OAEP 参数、多值 Header、生命周期排序，以及流式取消时的连接释放；先用公共向量消除协议偏差。
 示例数据库只演示单进程持久受理和配额事务，生产多副本的数据库原子性由应用实现；不引入通用存储框架。
