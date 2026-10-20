@@ -79,6 +79,14 @@ node examples/smoke/local-test.mjs
 
 连接真实平台时，复制 `example.config.json` 为本地配置，填写 API 应用或模板信任信息，按[接入指南](docs/guides/java-sdk.md)配置公开回调地址。模拟平台仅供本地测试。Example 默认监听环回地址。
 
+## Python 协议联调工具
+
+无需构建前端即可运行 HTTP 接收脚本，验证业务应用凭据通知或 API 订阅。它们只演示接收协议，不提供页面，不代替语言 SDK 或公共 Example 服务。
+
+- [业务应用平台配置](docs/guides/第三方业务应用接入说明.md)
+- [业务应用开发与 Python 示例](docs/guides/第三方业务应用开发指南.md)
+- [API 订阅接入与 Python 示例](docs/guides/第三方订阅接入指南.md)
+
 ## 目录
 
 | 目录 | 内容 |
