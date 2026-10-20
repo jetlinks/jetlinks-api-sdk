@@ -43,6 +43,7 @@ Python 异步轮换先移除全部旧连接，再等待关闭；调用方取消�
 新增回归覆盖真实 HTTP 零发送、TS 正/负向编译、独立版本维度、同版本冲突、启停/删除/重建、跨模式与平台隔离、有界水位及异步轮换取消。
 Java AOSP 格式与 core 依赖边界、Node/Python lint/格式均通过；Java 制品、npm tgz 和 Python sdist/wheel 构建成功。
 使用本轮 Java 制品、Node dist 与 Python 源码复跑四服务模拟平台验收，各 13 项、共 52 项全部通过；共享前端未变，复用此前构建。
+并发修复提交 `de4e487`，随同一 [PR #19](https://github.com/jetlinks/jetlinks-api-sdk/pull/19) 交付至 `2.0`。
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
