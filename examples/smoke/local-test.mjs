@@ -1,4 +1,4 @@
-/** Runs the same acceptance scenarios against both executable Java services. Node >= 20. */
+/** One independent platform fixture and acceptance suite for every language service. */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -25,7 +25,14 @@ async function stop(child) {
   await exited; clearTimeout(timer);
 }
 
-for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split(',')) {
+for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot,nodejs,python').split(',')) {
+  const descriptor = {
+    'plain-java': { language: 'java', modes: ['reactive', 'sync'], name: 'JetLinks Java Example' },
+    'spring-boot': { language: 'java', modes: ['reactive', 'sync'], name: 'JetLinks Java Example' },
+    nodejs: { language: 'nodejs', modes: ['promise'], name: 'JetLinks Node.js Example' },
+    python: { language: 'python', modes: ['async', 'sync'], name: 'JetLinks Python Example' },
+  }[kind];
+  assert.ok(descriptor, 'Unknown example kind: ' + kind);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'jetlinks-' + kind + '-'));
   const configFile = path.join(directory, 'example.local.json'), port = await freePort(), base = 'http://127.0.0.1:' + port;
   const fixture = await createFixture({ port: 0, exampleUrl: base, examplePort: port, configFile, directory });
@@ -35,7 +42,9 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
     const jar = `sdk-java/examples/${kind}/target/${artifact}-2.0.0-SNAPSHOT.jar`;
     const args = kind === 'spring-boot' ? ['-Dexample.config=' + configFile, '-jar', jar] : ['-jar', jar, configFile];
     const log = createWriteStream(path.join(directory, 'service.log'), { flags: 'a' });
-    child = spawn(java, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const executable = kind === 'nodejs' ? process.execPath : kind === 'python' ? (process.env.PYTHON || 'sdk-python/.venv/bin/python') : java;
+    const launchArgs = kind === 'nodejs' ? ['sdk-nodejs/examples/server.mjs', configFile] : kind === 'python' ? ['sdk-python/examples/server.py', configFile] : args;
+    child = spawn(executable, launchArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.pipe(log); child.stderr.pipe(log);
     child.on('error', error => { console.error(error); });
     for (let n = 0; n < 300; n++) {
@@ -56,20 +65,25 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
     await launch();
     await scenario('shared UI and public contract', async () => {
       assert.match(await (await fetch(base)).text(), /JetLinks SDK/);
-      assert.equal((await request('/example-api/info')).language, 'java');
-      const smoke = spawn(process.execPath, ['--test', 'examples/smoke/smoke.test.mjs'], { env: { ...process.env, EXAMPLE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
-      let errors = ''; smoke.stderr.on('data', b => errors += b);
+      const info = await request('/example-api/info');
+      assert.equal(info.language, descriptor.language);
+      assert.deepEqual(info.clientModes.map(v => v.value), descriptor.modes);
+      const smoke = spawn(process.execPath, ['--test', 'examples/smoke/smoke.test.mjs'], { env: { ...process.env, EXAMPLE_URL: base }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let errors = ''; smoke.stderr.on('data', b => errors += b); smoke.stdout.on('data', b => errors += b);
       assert.equal((await once(smoke, 'exit'))[0], 0, errors);
     });
-    await scenario('API OAuth2/local, sync/reactive, coalesced refresh', async () => {
+    await scenario('API OAuth2/local, native call modes, coalesced refresh', async () => {
       const inputs = Array.from({ length: 20 }, () => ({ authMode: 'oauth2', path: '/fixture/echo' }));
       const values = await Promise.all(inputs.map(input => operation('api', 'requests', input)));
       assert.ok(values.every(v => v.result.auth === 'machine'));
       assert.equal(fixture.counters.machineTokens.api, 1);
-      for (const authMode of ['local', 'oauth2']) for (const client of ['reactive', 'sync']) {
+      for (const authMode of ['local', 'oauth2']) for (const client of descriptor.modes) {
         const value = await operation('api', 'requests', { authMode, client, path: '/fixture/echo', method: 'POST', body: { message: '你好' } });
         assert.equal(value.result.applicationId, 'api-app'); assert.equal(value.result.body.message, '你好');
       }
+      // 独立于各语言调用门面数量，验证默认客户端确实命中已经刷新过的缓存。
+      await operation('api', 'requests', { path: '/fixture/echo' });
+      await operation('api', 'requests', { path: '/fixture/echo' });
       const diagnostics = await operation('api', 'diagnostics');
       assert.equal(diagnostics.tokenRefreshes, 1); assert.ok(diagnostics.tokenCacheHits >= 2);
     });
@@ -180,7 +194,7 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
         return stream ? (await response.text()).trim().split('\n').filter(Boolean).map(JSON.parse) : response.json();
       }
       const health = await command('GetServiceHealth'); assert.equal(health.status, 'UP');
-      const info = await command('GetServiceInfo'); assert.equal(info.name, 'JetLinks Java Example');
+      const info = await command('GetServiceInfo'); assert.equal(info.name, descriptor.name);
       const resources = await command('GetTenantResources', {}, 'east', true);
       assert.equal(resources[0].id, 'example');
       assert.equal(resources[0].metrics[0].id, 'requests');
@@ -211,6 +225,17 @@ for (const kind of (process.env.EXAMPLE_KINDS || 'plain-java,spring-boot').split
       const response = await fetch(base + '/example-api/applications/api/requests', { method: 'POST', body: JSON.stringify({ path: '/fixture/stream', stream: true }) });
       const reader = response.body.getReader(); assert.ok(!(await reader.read()).done); await reader.cancel();
       await pause(250); assert.ok(fixture.counters.cancelledStreams >= 1);
+    });
+    await scenario('exact decimal wire values and rejected incomplete quota snapshot', async () => {
+      const vectors = JSON.parse(await fs.readFile('examples/contract/vectors.json', 'utf8'));
+      const echo = await fixture.command('east', 'Echo', {}, { rawBody: '{"amount":' + vectors.decimal + '}' });
+      assert.equal(echo.status, 200);
+      const text = await echo.text(), number = text.match(/"amount"\s*:\s*([0-9.+Ee-]+)/)?.[1];
+      assert.equal(number?.replace(/0+$/, ''), vectors.decimal.replace(/0+$/, ''));
+      const invalid = await fixture.command('east', 'SaveTenantLimits', { revision: 100, limits: [] });
+      assert.equal(invalid.status, 500); await invalid.text();
+      const retained = await fixture.command('east', 'SaveTenantLimits', { revision: 4, limits: [], capabilities: [] });
+      assert.equal(retained.status, 200); assert.equal((await retained.json()).revision, 5);
     });
     let replay;
     await scenario('synced does not rotate; rotate/disable/delete/recreate/late events', async () => {

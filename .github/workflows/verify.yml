@@ -17,7 +17,14 @@ jobs:
         with: {distribution: temurin, java-version: '17', cache: maven}
       - uses: actions/setup-node@v4
         with: {node-version: '22', cache: npm, cache-dependency-path: examples/shared-ui/package-lock.json}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
       - run: npm ci && npm test && npm run typecheck && npm run lint && npm run build
         working-directory: examples/shared-ui
       - run: mvn -B package -DskipTests
+      - run: npm ci && npm run lint && npm test && npm pack
+        working-directory: sdk-nodejs
+      - run: python -m venv sdk-python/.venv && sdk-python/.venv/bin/pip install -e 'sdk-python[example,test]'
+      - run: .venv/bin/ruff check src examples tests && .venv/bin/ruff format --check src examples tests && .venv/bin/python -m pytest && .venv/bin/python -m build
+        working-directory: sdk-python
       - run: node examples/smoke/local-test.mjs

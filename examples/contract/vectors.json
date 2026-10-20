@@ -1,0 +1,13 @@
+{
+  "signature": {
+    "secret": "secret-fixture",
+    "fields": ["1", "应用", "east", "notify", "1700000000000", "event-1", "abc"],
+    "expected": "LYGWZ1D09fHxoZ1wiVraJL3f2zVABkt0p49snBNpEpI"
+  },
+  "tokens": [
+    {"key":"key-测试","secret":"secret-fixture","issuedAt":1700000000000,"scopes":null,"expected":"at_4kOjYddorH3Y5WHOktg9LKsV1nFrBsfZ05q9mFewvAWdEdbrPeOifXWhnmC"},
+    {"key":"key-测试","secret":"secret-fixture","issuedAt":1700000000000,"scopes":[],"expected":"at_4kOjYddorH3Y5WHOktg9LKsV1nFrBsfZAC6nMaGiNhJWi3HaTlLLu1kxcYq"},
+    {"key":"key-测试","secret":"secret-fixture","issuedAt":1700000000000,"scopes":["write","read","read"],"expected":"at_tKCXSbwWQlVgijsl3l9Q4L8XyhjIU5500WCmyxXs9E3Tvkms2ArnGbJqa5C2CUKHZuiHfgVmxvnm"}
+  ],
+  "decimal": "12345678901234567890.12345678901234567890"
+}

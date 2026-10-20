@@ -2,6 +2,106 @@
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
+## 多语言接入与体验优化
+
+状态：已按确认范围完成 M01—M06，并通过本地模拟平台验证。Java 接入简化、Node.js/Python SDK 与共用示例均已实现；下文原有 Java 阶段记录保留。
+
+### 目标与现状
+
+让第三方应用开发者按“配置可信模板 → 启动通知/命令端点 → 接收凭据 → 调用平台 → 用户登录”完成首次接入，
+随后按需接入授权同步、订阅及资源/用量/配额。API 应用使用预配置凭据，复用同一客户端与通知基础能力。
+
+本轮用 `.local` / `.oauth2` 与 `ApplicationClients` 减少认证和客户端缓存装配，Java `ExampleService` 已复用这些入口。
+Node.js/Python 已提供独立客户端、模型和完整服务示例；验收器按服务声明的调用模式执行相同场景。
+`NotificationStore` 仍由应用实现可靠事务，示例提供 SQLite/H2 实现，不通过提前返回成功省略持久受理。
+
+任务级别 L；owning repository 为 `jetlinks-api-sdk`，目标分支为 `2.0`，交付复用 [PR #17](https://github.com/jetlinks/jetlinks-api-sdk/pull/17)。范围为 `sdk-java/`、`sdk-nodejs/`、
+`sdk-python/`、`examples/`、接入指南及 CI。以已合并平台的公开契约为准，不修改平台仓库。
+
+### 最小公共设计
+
+1. 保留现有客户端、通知验签、生命周期算法和命令服务，通过少量组合入口减少装配。
+   新增 `ApplicationClients`，根据调用方提供的当前 `ApplicationState` 创建/复用客户端；按平台、应用、本次生命周期、认证模式和 Scope 隔离，
+   地址/凭据/版本变化时替换并关闭旧客户端，禁用/删除时失效，实例数量有界，整体可关闭。状态每次由调用方提供，
+   不新增第二份应用状态缓存或后台同步任务。Token 复用现有缓存及并发刷新语义，不自动重放业务请求。
+2. Java 保留 `JetLinksClient` / `JetLinksReactiveClient`；Node.js 使用 Promise 请求与 AsyncIterable 分页/流；
+   Python 提供同步 `JetLinksClient` 和异步 `AsyncJetLinksClient`，共用模型、编解码与签名实现。
+   各语言提供凭据创建客户端的便捷入口，普通 API 调用不要求先理解 TokenProvider 的装配。
+3. 固定契约使用 DTO、类型声明、事件/命令/Header 常量及统一 SDK 异常；自定义参数保留泛型或 Map/dict。
+   已有低层接口继续可用，不新增平台业务 API 生成器、命令 Schema 注册中心或框架式 Runtime。
+4. 验签使用原始正文和多值 Header；身份来自验签后的上下文及本地信任记录，不从 `event.data` 或 `subject` 推断应用。
+   通知事务、去重和生命周期处理成功后才返回成功；应用存储仍由业务选择，示例给出完整持久实现。
+5. 三种语言保持相同线上协议及错误边界，不强求类结构相同。Node.js 22+、Python 3.11+；
+   Node 使用原生 HTTP/crypto 能力及成熟十进制编解码库，Python 使用 httpx、cryptography 及支持 Decimal 的 JSON 编解码。
+   计量值保留精确十进制，线上仍为契约中的 JSON number，不能默默改成字符串或先转为浮点数。
+
+### 开发任务与顺序
+
+| 任务 | 交付内容 | 完成条件 |
+| --- | --- | --- |
+| M01：契约与接入入口 | 核对已合并平台；整理现有公开能力清单及跨语言签名、Token、通知、生命周期、十进制测试向量 | 向量独立于被测 SDK，明确字节编码、时间/版本与空集合语义 |
+| M02：Java 接入简化 | 实现上述客户端复用入口和凭据便捷工厂；示例复用这些能力；Starter 沿用现有通知/命令 Bean 与端点 | 首次调用不必手动组装 TokenProvider；示例不再自行维护同类客户端缓存；双客户端行为一致 |
+| M03：Node.js SDK | TypeScript 包 `@jetlinks/sdk-client`，构建为可导入 JavaScript 并发布类型声明；实现下表全部公共能力 | Promise/AsyncIterable、错误、取消、缓存并发及模型通过独立协议测试 |
+| M04：Python SDK | 包 `jetlinks-sdk-client`，导入名 `jetlinks_sdk_client`；实现下表公共能力及同步/异步门面 | 两种客户端共用协议代码，分页/流及时释放连接，异步入口无阻塞网络调用 |
+| M05：真实示例 | Node.js HTTP、Python ASGI 服务，各自使用本语言 SDK；SQLite 持久化仅在示例层；Java 继续复用 H2 | 同一配置结构、Example API、单一前端；展示真实通知、登录、调用及命令结果；重启恢复 |
+| M06：指南与统一验收 | 首页按语言选择快速开始；各语言短指南；验收启动器及 CI 增加语言矩阵 | 本地模拟平台下全部服务通过共同场景，文档命令可运行，制品可本地安装 |
+
+M01/M02 先完成并集中验证，再实现 M03/M04；M05 接入已有前端，最后统一执行 M06。
+不因语言差异复制模拟平台、前端或整套场景脚本。
+
+### 三种语言的公共能力范围
+
+| 能力 | 本期范围 |
+| --- | --- |
+| 平台调用 | 普通/类型化请求、平台响应包装、分页、NDJSON、超时、连接复用、正文/单行及并发限制、取消与关闭 |
+| 认证 | OAuth2 client_credentials、本地签名机器 Token、已有 Bearer；Token 到期缓存、同身份并发合并、失败冷却及失效 |
+| 第三方生命周期 | 创建/凭据同步/轮换/启停/删除、RSA 解密、多区域同 ID 隔离、可信 apiBaseUrl、乱序/重复/同 ID 重建 |
+| 通知 | 两类应用验签及可信身份、类型化事件、可靠受理接口、事务去重示例；支持平台已有事件扩展字段 |
+| 用户访问 | state/PKCE、Code 兑换、用户身份与授权上下文；文档覆盖平台进入，浏览器关联和本地会话由应用管理 |
+| 授权事实 | 成员、角色、用户角色、API 授权、角色菜单/权限/资产；复用有界快照与并发刷新，不实现权限引擎 |
+| API 订阅 | 目录、创建/查询/更新/校验/启停/删除及投递查询；示例明确管理权限与机器身份的差别 |
+| 第三方命令 | 注册处理器、真实能力清单、请求验签/响应签名、JSON/NDJSON、并发预算；标准服务查询与租户资源/用量/配额模型 |
+
+命令 Header 签名沿用平台算法，正文完整性依赖 HTTPS；不改变已有协议以追求表面统一。
+`GetTenantResources` 使用资源内局部指标 ID，`ReadTenantUsage` / `SaveTenantLimits` 使用完整指标标识；
+配额为 `{revision, limits, capabilities}` 完整快照，空集合表示撤销；绝对用量、版本及窗口语义保持一致。
+
+### 示例与文档
+
+- 三种语言的入口只展示必要装配；业务处理器接收可信应用上下文与类型化参数。完整诊断仍由共享 Example API 承载。
+- Node/Python 托管现有 `examples/shared-ui/dist`，实现 `examples/contract/openapi.yaml`；浏览器不接触应用 Secret、私钥或平台 Token。
+- 继续使用 `example.config.json` 与独立 `platform-fixture.mjs`，无需真实平台凭据即可体验多区域、通知、登录、订阅及命令闭环。
+- 将 `local-test.mjs` 的启动器和调用模式按服务能力参数化：Java 验证同步/响应式，Python 验证同步/异步，Node 验证 Promise/AsyncIterable。
+  公共场景不得因某语言尚未实现而静默跳过。
+- README 只保留选语言、运行服务和首次调用；语言指南讲正常流程、签名算法边界及短示例，详细 Example 配置统一链接现有说明。
+  同步修正现有示例文档中遗漏必填 `capabilities` 的配额报文及过时验证数量。
+
+### 验证、风险与边界
+
+合并前已完成以下集中验证；本次将多语言优化与示例修复合入同一 PR，合并结果待统一重新验证 Java、前端、Node.js/Python 和四服务端到端场景：
+
+- Java 17 `mvn -o verify`：75 项测试通过，0 失败/错误/跳过；`python3 tools/check-dependencies.py` 通过，core 不含 Spring/platform/hsweb 依赖。
+- Node.js `npm run lint`、`npm test`：格式、TypeScript 构建和 14 项测试通过；`npm pack` 成功，独立项目安装 tgz 后通过严格 TypeScript 编译和运行。
+- Python 3.11 Ruff 检查/格式、`pytest`：11 项测试通过；sdist/wheel 构建成功，独立虚拟环境安装 wheel 后可导入，精确小数和 `py.typed` 均正常。
+- 共享前端 lint、typecheck、build 通过；四种服务共用同一前端与 Example API，调用模式由 `/info` 声明。
+- 仓库根目录运行 `node examples/smoke/local-test.mjs`，支持 `EXAMPLE_KINDS` 选择服务。本次 plain-java、spring-boot、nodejs、python 各通过 13 个公共场景，共 52 个；Java 同步/响应式、Python 同步/异步及 Node Promise/AsyncIterable 均实际调用。
+
+场景覆盖两类应用、多区域隔离、验签/篡改、首次信任、轮换/禁用/删除/重建、重复/乱序、重启去重、Token 并发刷新、
+state/PKCE/回放、授权事实/订阅、命令及流失败/取消、精确十进制和配额撤销。SQLite 写入失败回滚由单元测试验证；
+Node.js 额外验证超过 JS 安全整数的相邻凭据/配额版本保持顺序，旧版本不能覆盖新状态。
+
+关键入口：`sdk-java/sdk-client-core/src/main/java/org/jetlinks/sdk/client/ApplicationClients.java`、`sdk-nodejs/src/`、`sdk-python/src/jetlinks_sdk_client/`、
+两种语言的 `examples/server.*` / `examples/store.*`、`examples/contract/vectors.json` 和 `examples/smoke/local-test.mjs`。
+当前验证日志为 `/private/tmp/jetlinks-multilang-java-current.log`、`/private/tmp/jetlinks-multilang-java-e2e-current.log`、
+`/private/tmp/jetlinks-multilang-node-e2e-current.log`、`/private/tmp/jetlinks-multilang-dynamic-final.log`、
+`/private/tmp/jetlinks-multilang-python-final.log` 和 `/private/tmp/jetlinks-multilang-ui-final.log`。
+npm/Python 独立制品安装结果见 `/private/tmp/jetlinks-multilang-node-install.log`、`/private/tmp/jetlinks-multilang-python-install.log`。
+
+主要风险是跨语言数字精度、RSA OAEP 参数、多值 Header、生命周期排序，以及流式取消时的连接释放；先用公共向量消除协议偏差。
+示例数据库只演示单进程持久受理和配额事务，生产多副本的数据库原子性由应用实现；不引入通用存储框架。
+尚未连接真实平台或多副本生产环境，未发布 Maven/npm/PyPI 制品；未修改后端或线上配置。
+本期边界保持为公开接入能力，不增加全平台业务 API 生成、区域发现、自动计费或自动配额推送。
+
 ## 标准服务查询与配额同步
 
 按平台已确认契约实现 `CommandIds`、`ServiceHealth`、`ServiceInfo`、`TenantResource`、`TenantMetric`、`ReadTenantUsage`、
@@ -33,7 +133,7 @@
 
 示例状态修复已实现：`PendingLogins` 统一拥有待登录记录的 TTL、单次消费和原子容量预留，授权失败、取消或缺少跳转结果时释放名额，成功登录等待回调。共享前端 `requestScope.ts` 按操作管理当前请求，应用切换时取消全部旧请求；普通请求和 NDJSON 均传递 AbortSignal，迟到结果、错误、诊断、通知详情和登录跳转不能更新新上下文，旧请求结束也不能清掉新请求的加载状态。范围限 Java 共用示例和共享前端，不改变 SDK 核心、签名协议或平台配置。
 
-集中验证：`mvn -o -pl sdk-java/examples/example-common -am test -Dtest=PendingLoginsTest,ExampleLoginTest,ExampleIntegrationTest,ExampleQuotaTest -Dsurefire.failIfNoSpecifiedTests=false` 在 JDK 21 / release 17 下通过 16 项，0 失败/错误/跳过，包含真实 HTTP/H2 及可控时钟；覆盖 128 条全部过期后的恢复、失败/取消释放、并发容量上限和单次消费。共享前端 `npm test` 7 项、`npm run lint`、`npm run typecheck`、`npm run build` 通过；组件回归执行实际 setup 与 Vue 响应式逻辑，控制普通请求、流、诊断和通知详情的完成顺序。CI 已接入前端测试；本地未启动浏览器或连接生产平台，Java 17 运行时由 CI 验证。修复 PR 面向 `2.0`，原工作区未提交的多语言改动不在本次范围内。
+合并前集中验证：`mvn -o -pl sdk-java/examples/example-common -am test -Dtest=PendingLoginsTest,ExampleLoginTest,ExampleIntegrationTest,ExampleQuotaTest -Dsurefire.failIfNoSpecifiedTests=false` 在 JDK 21 / release 17 下通过 16 项，0 失败/错误/跳过，包含真实 HTTP/H2 及可控时钟；覆盖 128 条全部过期后的恢复、失败/取消释放、并发容量上限和单次消费。共享前端 `npm test` 7 项、`npm run lint`、`npm run typecheck`、`npm run build` 通过；组件回归执行实际 setup 与 Vue 响应式逻辑，控制普通请求、流、诊断和通知详情的完成顺序。CI 已接入前端测试；本地未启动浏览器或连接生产平台，Java 17 运行时由 CI 验证。按用户追加要求，原工作区的多语言优化现一并纳入面向 `2.0` 的 PR #17，合并后的统一验证见文首多语言部分。
 
 生命周期修复：复用 `application.createTime` 识别同 ID 应用的生命周期，`occurredAt` 只排序同一生命周期内的事实，凭据 revision 也仅在同一生命周期比较；创建通知保留平台实际启停状态。范围为 core 合并函数、现有通知夹具、示例和指南，不新增协议、状态字段或配置。集中验证同步先到、旧通知迟到、删除重建及停用创建，并审查平台创建时间、密钥维护和可靠投递边界。
 

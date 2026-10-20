@@ -7,6 +7,8 @@ const info=ref<ServiceInfo>(),apps=ref<Application[]>([]),selected=ref(''),tab=r
 const app=computed(()=>apps.value.find(a=>a.contextId===selected.value))
 const endpoint=computed(()=>'/applications/'+encodeURIComponent(selected.value))
 const authMode=ref('oauth2'),client=ref('reactive'),method=ref('GET'),path=ref('/authorize/context'),body=ref(''),stream=ref(false),result=ref<unknown>()
+const clientModes=computed(()=>info.value?.clientModes || [{value:'reactive',label:'JetLinksReactiveClient'},{value:'sync',label:'JetLinksClient'}])
+watch(clientModes,modes=>{if(!modes.some(mode=>mode.value===client.value))client.value=modes[0]?.value || ''})
 const diagnostics=ref<unknown>(),receipts=ref<Receipt[]>([]),receipt=ref<Receipt>(),page=ref(0),total=ref(0),allApps=ref(true),poll=ref(true)
 const eventType=ref(''),eventId=ref(''),receiptStatus=ref('')
 const session=ref<unknown>(),authorization=ref<unknown>(),commands=ref<unknown>(),subscriptionResult=ref<unknown>()
@@ -83,7 +85,7 @@ onUnmounted(()=>{requests.cancel();if(timer)clearInterval(timer)})
     <a-empty v-if="!app" description="先在 Example 配置中填写 API 应用，或配置模板后接收业务应用通知"/>
     <div v-else class="split">
      <section class="section"><h2>发起请求</h2><a-form layout="vertical">
-      <div class="row"><a-form-item label="认证"><a-select v-model:value="authMode" :options="[{value:'oauth2',label:'OAuth2 机器 Token'},{value:'local',label:'本地签名机器 Token'},{value:'user',label:'配置的用户 Token'}]"/></a-form-item><a-form-item label="客户端"><a-select v-model:value="client" :options="[{value:'reactive',label:'JetLinksReactiveClient'},{value:'sync',label:'JetLinksClient'}]"/></a-form-item></div>
+      <div class="row"><a-form-item label="认证"><a-select v-model:value="authMode" :options="[{value:'oauth2',label:'OAuth2 机器 Token'},{value:'local',label:'本地签名机器 Token'},{value:'user',label:'配置的用户 Token'}]"/></a-form-item><a-form-item label="客户端"><a-select v-model:value="client" :options="clientModes"/></a-form-item></div>
       <div class="row"><a-form-item label="方法"><a-select v-model:value="method" :options="['GET','POST','PUT','PATCH','DELETE'].map(value=>({value}))"/></a-form-item><a-form-item label="平台内路径" class="grow"><a-input v-model:value="path" aria-label="平台内路径"/></a-form-item></div>
       <a-form-item label="JSON 请求正文（可选）"><a-textarea v-model:value="body" :rows="7" aria-label="JSON 请求正文"/></a-form-item>
       <a-space><a-checkbox v-model:checked="stream">NDJSON 流</a-checkbox><a-button type="primary" :loading="busy" @click="run(invoke)">发送请求</a-button><a-button v-if="busy&&stream" @click="requests.cancel('request')">取消流</a-button><a-button @click="run(refreshDiagnostics)">查看缓存状态</a-button></a-space>

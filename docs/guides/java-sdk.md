@@ -19,8 +19,7 @@ API 应用没有 `X-Platform-Id`；连接多个平台且应用 ID 重复时，�
 
 ```java
 // 本地生成平台支持的二进制 at_ 机器 Token，无需访问 /oauth2/token。
-CachedTokenProvider tokens = OAuth2.localTokens(key, secret, null, Duration.ofMinutes(2));
-JetLinksReactiveClient reactive = new JetLinksReactiveClient(apiBaseUrl, tokens);
+JetLinksReactiveClient reactive = JetLinksReactiveClient.local(apiBaseUrl, key, secret);
 Mono<AuthorizationContext> result = reactive.request(
     ApiRequest.get("/authorize/context"), AuthorizationContext.class);
 
@@ -42,6 +41,20 @@ JetLinksReactiveClient client = new JetLinksReactiveClient(apiBaseUrl, oauth.mac
 // 或 new JetLinksReactiveClient(apiBaseUrl, TokenProvider.bearer(existingToken))
 // 服务停止时同时关闭 client 和 oauth。
 ```
+
+多应用服务使用服务级 `ApplicationClients`，每次业务操作传入持久层的当前状态：
+
+```java
+ApplicationClients clients = new ApplicationClients(); // 停服时 close
+ApplicationClients.Handle handle = clients.get(localContextId, currentState); // 默认 OAuth2
+Mono<AuthorizationContext> result = handle.client.request(
+    ApiRequest.get("/authorize/context"), AuthorizationContext.class);
+// 普通线程可使用 handle.sync；单次请求不关闭共享 Handle。
+```
+
+管理器不缓存第二份应用状态。地址/凭据/生命周期变化时替换连接，禁用/删除时拒绝获取；通知事务提交后可
+`invalidate(localContextId)`。API 同名应用及不同用户身份使用不同本地 contextId，认证模式与 Scope 自动隔离。
+默认上限 128；`LOCAL`、`OAUTH2`、`BEARER` 可显式选择。返回的客户端只在本次操作内使用，不长期保存旧 Handle。
 
 机器 Token 自动缓存，同一次并发刷新共用一次申请；失败有冷却时间。凭据或 API 地址变化后关闭旧客户端并重新创建。Scope 的 `null` 表示平台默认，空列表表示明确不申请 Scope。
 
@@ -298,4 +311,4 @@ jetlinks:
 
 Starter 基于 Spring Boot 3.5 / Java 17，自动发现配置并适配 MVC 或 WebFlux；MVC 使用 `jakarta.servlet`。核心 SDK 可独立于 Spring 使用。
 
-验证：Java 17 全模块 `mvn verify`，50 项通过；包括公开事件扩展与未知字段的 JSON 往返。
+完整验收方式见 [Example 配置与验证](examples.md)。

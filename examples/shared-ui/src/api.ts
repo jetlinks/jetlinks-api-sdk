@@ -7,7 +7,7 @@ export interface Receipt {
  recordId:string; applicationId?:string; platformId?:string; eventId?:string; type?:string;
  receivedAt:number; verified:boolean; accepted:boolean; duplicate?:boolean; rawBody:string
 }
-export interface ServiceInfo {language:string; sdkVersion:string; features:string[]; syncStatus:string}
+export interface ServiceInfo {language:string; sdkVersion:string; features:string[]; syncStatus:string;clientModes?:{value:string;label:string}[]}
 export async function api<T>(path:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<T> {
  const response=await fetch('/example-api'+path,{method,headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal})
  const value=await response.json()

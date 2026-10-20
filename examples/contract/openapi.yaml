@@ -21,6 +21,15 @@ paths:
                   sdkVersion: {type: string}
                   features: {type: array, items: {type: string}}
                   syncStatus: {type: string}
+                  clientModes:
+                    type: array
+                    description: 服务实际提供的调用方式，前端直接使用该列表
+                    items:
+                      type: object
+                      required: [value, label]
+                      properties:
+                        value: {type: string}
+                        label: {type: string}
   /applications:
     get:
       responses:
@@ -52,7 +61,7 @@ paths:
                 method: {type: string, default: GET}
                 body: {}
                 authMode: {type: string, enum: [oauth2, local, user], default: oauth2}
-                client: {type: string, enum: [sync, reactive], default: reactive}
+                client: {type: string, enum: [sync, reactive, promise, async], description: 从 info.clientModes 选择；省略使用服务默认值}
                 stream: {type: boolean, default: false}
       responses:
         '200':

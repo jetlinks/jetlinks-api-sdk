@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 
 import org.jetlinks.sdk.client.*;
+import org.jetlinks.sdk.client.ApplicationClients.Handle;
 import org.jetlinks.sdk.client.SdkException.Code;
 import org.jetlinks.sdk.client.auth.*;
 import org.jetlinks.sdk.client.command.*;
@@ -41,7 +42,7 @@ public final class ExampleService implements AutoCloseable {
     public final ExampleStore store;
     private final NotificationVerifier verifier;
     private final CommandService commands;
-    private final Map<String, Handle> clients = new ConcurrentHashMap<>();
+    private final ApplicationClients clients = new ApplicationClients();
     private final Map<String, SnapshotSynchronizer<AuthorizationSnapshot>> synchronizers =
             new ConcurrentHashMap<>();
     private final Set<String> dirty = ConcurrentHashMap.newKeySet();
@@ -323,6 +324,14 @@ public final class ExampleService implements AutoCloseable {
                                     "java",
                                     "sdkVersion",
                                     "2.0.0-SNAPSHOT",
+                                    "clientModes",
+                                    List.of(
+                                            map(
+                                                    "value",
+                                                    "reactive",
+                                                    "label",
+                                                    "JetLinksReactiveClient"),
+                                            map("value", "sync", "label", "JetLinksClient")),
                                     "features",
                                     Arrays.asList(
                                             "requests",
@@ -425,18 +434,17 @@ public final class ExampleService implements AutoCloseable {
                                                                                         .equals(
                                                                                                 stateIdentity(
                                                                                                         after))) {
-                                                                                    clients.entrySet()
-                                                                                            .removeIf(
-                                                                                                    entry -> {
-                                                                                                        if (!entry.getKey()
-                                                                                                                .startsWith(
-                                                                                                                        id
-                                                                                                                                + ":"))
-                                                                                                            return false;
-                                                                                                        entry.getValue()
-                                                                                                                .close();
-                                                                                                        return true;
-                                                                                                    });
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id);
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id
+                                                                                                            + ":user");
+                                                                                    clients
+                                                                                            .invalidate(
+                                                                                                    id
+                                                                                                            + ":management");
                                                                                     synchronizers
                                                                                             .remove(
                                                                                                     id);
@@ -854,59 +862,23 @@ public final class ExampleService implements AutoCloseable {
     }
 
     private Handle client(String context, ApplicationState state, String mode) {
-        if (!state.active())
-            throw new SdkException(
-                    Code.INVALID_ARGUMENT, "Application is inactive or credentials are missing");
-        if (clients.size() >= 128 && !clients.containsKey(context + ":" + mode))
-            throw new SdkException(Code.LIMIT_EXCEEDED, "Example client capacity reached");
-        String fingerprint =
-                Signatures.sha256(
-                        Json.bytes(
-                                Arrays.asList(
-                                        state.apiBaseUrl,
-                                        state.accessKey,
-                                        state.accessSecret,
-                                        state.keyRevision,
-                                        mode)));
-        return clients.compute(
-                context + ":" + mode,
-                (k, old) -> {
-                    if (old != null && old.fingerprint.equals(fingerprint)) return old;
-                    if (old != null) old.close();
-                    OAuth2 oauth = null;
-                    CachedTokenProvider provider = null;
-                    TokenProvider auth;
-                    if ("management".equals(mode))
-                        auth =
-                                TokenProvider.bearer(
-                                        Objects.requireNonNull(managementToken(context)));
-                    else if ("user".equals(mode))
-                        auth =
-                                TokenProvider.bearer(
-                                        Objects.requireNonNull(userToken(context, state)));
-                    else if ("local".equals(mode))
-                        auth =
-                                provider =
-                                        OAuth2.localTokens(
-                                                state.accessKey,
-                                                state.accessSecret,
-                                                null,
-                                                Duration.ofMinutes(2));
-                    else if ("oauth2".equals(mode)) {
-                        oauth =
-                                new OAuth2(
-                                        state.apiBaseUrl,
-                                        state.accessKey,
-                                        state.accessSecret,
-                                        true);
-                        auth = provider = oauth.machineTokens(null);
-                    } else throw new SdkException(Code.INVALID_ARGUMENT, "Unknown authMode");
-                    return new Handle(
-                            fingerprint,
-                            new JetLinksReactiveClient(state.apiBaseUrl, auth),
-                            oauth,
-                            provider);
-                });
+        if ("management".equals(mode) || "user".equals(mode)) {
+            String token =
+                    "management".equals(mode)
+                            ? managementToken(context)
+                            : userToken(context, state);
+            return clients.get(
+                    context + ":" + mode,
+                    state,
+                    ApplicationClients.Mode.BEARER,
+                    null,
+                    Objects.requireNonNull(token));
+        }
+        ApplicationClients.Mode authMode;
+        if ("local".equals(mode)) authMode = ApplicationClients.Mode.LOCAL;
+        else if ("oauth2".equals(mode)) authMode = ApplicationClients.Mode.OAUTH2;
+        else throw new SdkException(Code.INVALID_ARGUMENT, "Unknown authMode");
+        return clients.get(context, state, authMode);
     }
 
     private String stateIdentity(ApplicationState s) {
@@ -1075,27 +1047,7 @@ public final class ExampleService implements AutoCloseable {
 
     public void close() {
         if (worker != null) worker.dispose();
-        clients.values().forEach(Handle::close);
-        clients.clear();
-    }
-
-    private static final class Handle implements AutoCloseable {
-        final String fingerprint;
-        final JetLinksReactiveClient client;
-        final OAuth2 oauth;
-        final CachedTokenProvider provider;
-
-        Handle(String f, JetLinksReactiveClient c, OAuth2 o, CachedTokenProvider p) {
-            fingerprint = f;
-            client = c;
-            oauth = o;
-            provider = p;
-        }
-
-        public void close() {
-            client.close();
-            if (oauth != null) oauth.close();
-        }
+        clients.close();
     }
 
     private static final class PendingLogin {
