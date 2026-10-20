@@ -1,5 +1,7 @@
 # JetLinks Client SDK 2.0
 
+⚠️ 适配 JetLinks 企业版、旗舰版 2.20+
+
 Java、Node.js、Python 客户端，支持 API 应用和第三方业务应用接入，不依赖 JetLinks 平台或 hsweb。
 
 | 语言 | 运行环境 | 接入入口 |
