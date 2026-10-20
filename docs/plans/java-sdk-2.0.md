@@ -17,6 +17,7 @@
 仅生成 `sdk-client-parent`、`sdk-client`、`sdk-client-core`、`sdk-client-spring-boot-starter` 四个坐标；两个库均含 JAR、POM 和源码，
 快照 metadata 可定位实际制品，上传发生在所有测试之后。日志为 `/private/tmp/jetlinks-pr17-publish.log`，本地 JDK 21 / release 17。
 复用未变化的多语言行为验证。真实 Nexus 写入由合入后的工作流执行，依赖仓库或组织提供发布 Secrets；本次没有触发远端发布。
+实现提交：`527316a`；交付至 [PR #18](https://github.com/jetlinks/jetlinks-api-sdk/pull/18)，目标分支 `2.0`。
 
 ## 多语言接入与体验优化
 
