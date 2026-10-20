@@ -84,6 +84,9 @@ try (Stream<Device> rows = client.stream(ApiRequest.get("/some/stream"), Device.
 
 ### 资产范围
 
+生产环境的对象生命周期、线程边界、惰性订阅和当前管理器限制见[客户端并发与对象复用](examples.md#客户端并发与对象复用)。
+根客户端/管理器应长期复用，`ApiRequest`、`Query` 和范围构造器按操作创建；临时范围视图通常无需额外缓存。
+
 `organization(id)`、`tenant(id)` 和 `scope(type,id)` 选择当前权限内的资产范围：
 
 ```java

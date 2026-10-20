@@ -2,6 +2,9 @@
 
 ## 资产范围
 
+生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：
+根客户端/管理器在同一事件循环内长期复用，options/body/迭代器按操作创建，临时范围视图通常无需额外缓存。
+
 ```js
 await client.request('/your/api', {
   assetScope: scope => scope.organization(orgId),

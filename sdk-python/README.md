@@ -2,6 +2,9 @@
 
 ## 资产范围
 
+生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：
+同步客户端可在线程间复用，异步客户端/管理器/Provider 只在所属事件循环内复用；临时范围视图通常无需额外缓存。
+
 ```python
 client.request('/your/api', asset_scope=lambda scope: scope.organization(org_id))
 with client.asset_scope(lambda scope: scope.tenant(tenant_id).scope('org', org_id)) as scoped:
