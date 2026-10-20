@@ -23,6 +23,8 @@ Node 额外覆盖共享并发预算、根关闭、流取消/超时、显式取�
 重建当前代码的 Java/Node/Python 制品和共享前端后，`node examples/smoke/local-test.mjs` 的四种服务各 13 项、共 52 项验收全部通过。
 本地使用 JDK 21 / release 17、Node 22.22.2、Python 3.11；未连接真实平台，平台侧权限行为仍以服务端实现为准。
 
+交付：实现提交 `c65d56a`，目标分支 `2.0`，评审入口 [PR #19](https://github.com/jetlinks/jetlinks-api-sdk/pull/19)。
+
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
 ## 多语言接入与体验优化
