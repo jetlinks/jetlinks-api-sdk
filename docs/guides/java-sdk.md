@@ -82,6 +82,34 @@ try (Stream<Device> rows = client.stream(ApiRequest.get("/some/stream"), Device.
 
 两个客户端的请求、流、分页均接受 `Class<T>` 或 `TypeRef<T>`；嵌套泛型使用后者。固定业务接口直接返回 SDK 模型，自定义业务接口可用自己的 DTO；不传类型的通用入口保留 `JsonNode`，用于调试和未知报文。
 
+### 资产范围
+
+`organization(id)`、`tenant(id)` 和 `scope(type,id)` 选择当前权限内的资产范围：
+
+```java
+client.request(ApiRequest.get("/your/api")
+    .assetScope(scope -> scope.organization(orgId)));
+client.request(ApiRequest.get("/your/api")
+    .assetScope(scope -> scope.tenant(tenantId)));
+client.request(ApiRequest.get("/your/api")
+    .assetScope(scope -> scope.scope("org", orgId)));
+
+try (var scoped = reactive.assetScope(scope -> scope
+        .tenant(tenantId).organization(orgId))) {
+    scoped.pages("/your/_query", new Query()).collectList().block();
+    new BusinessApplications(scoped, applicationId).members().collectList().block();
+    new Subscriptions(scoped, applicationId).events().block();
+}
+```
+
+同步与响应式客户端都支持 `assetScope`。视图共享认证缓存和连接，不修改原客户端；
+关闭视图使其后续调用失败，关闭根客户端使所有视图失效。流、分页和接收该视图的高级 API 自动继承范围。
+不同类型同时生效，取权限交集；同类型后设置覆盖前设置，请求 DSL 优先于请求原始 Header，二者优先于客户端默认。
+空 ID、首尾空白、控制字符及非法/超长范围会抛出 `INVALID_ARGUMENT`；最多 16 个类型，每类型最多 64 字符、ID 最多 256 个 UTF-16 单元。
+SDK 将 `organization` 映射为 `org`，每个维度发送独立的 `X-Asset-Scope: type:id` Header。
+原有 `.header("X-Asset-Scope", "org:" + orgId)` 仍可用；多个维度使用 DSL，不要拼接逗号列表。
+资产范围不会改变 OAuth2 授权 Scope 或 Token 缓存键。平台执行最终权限校验；指定范围不能获取原身份没有的权限，平台强制范围冲突仍会被拒绝。
+
 ## 3. 接收通知与生命周期
 
 接收原始正文及多值 Header，先验签，再事务受理，最后返回 2xx。不要先转换 JSON 再序列化参与验签。

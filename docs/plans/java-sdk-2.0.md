@@ -1,5 +1,28 @@
 # Java SDK 2.0 开发任务
 
+## 资产范围便捷 API
+
+按已确认方案在 Java、Node.js、Python 客户端增加请求级 Scope 和不可变客户端视图。
+`organization(id)` 映射 `org:id`，`tenant(id)` 映射 `tenant:id`，`scope(type,id)` 支持扩展类型。
+不同类型取交集，同类型后设置覆盖前设置；合并顺序为客户端默认、请求原始 Header、请求 DSL。
+每个范围以独立的 `X-Asset-Scope: type:id` Header 传输，不能用逗号合并。
+空值、首尾空白、控制字符、超长值、类型含冒号及超过 16 个范围在 SDK 边界拒绝。
+客户端视图共享认证缓存、连接和并发预算；关闭视图只关闭该视图，关闭根客户端使所有视图失效。
+范围经统一传输入口贯穿普通请求、流、分页及业务/订阅 API，平台仍负责权限校验，不扩展既有权限。
+
+已实现：Java `ApiRequest.assetScope` / 两种客户端的 `assetScope`，Node.js 请求选项及客户端的 `assetScope`，Python 同步/异步请求与视图的 `asset_scope`。
+构造器分别位于 Java core 的 `AssetScope.java`、`sdk-nodejs/src/asset-scope.ts`、`sdk-python/src/jetlinks_sdk_client/asset_scope.py`，
+统一传输入口合并并发送范围；Java 同时保留外部 HttpClient 原有范围 Header，作为 DSL 之下的默认值。
+Node.js 通过 Undici request 和根客户端持有的共享 Agent 保留多值 Header，使用 Node 标准流解码 gzip/deflate/br，并传递取消与解压错误。
+资产选择不会改变 OAuth2 授权 Scope、Token 缓存键或平台权限实现；未发布制品。
+
+验证：完整 `mvn -o verify` 后针对最终 Java core 补跑 `verify -pl sdk-java/sdk-client-core -am`，累计 85 项测试无失败/错误/跳过；
+Node.js 18 项、Python 14 项及各自 lint/格式检查通过。Java/AOSP 格式、core 依赖边界、三种语言制品构建通过。
+新增真实 HTTP 回归覆盖多维实际 Header、覆盖规则、非法参数、并发隔离、认证复用、生命周期、分页/流、高级 API、外部默认 Header；
+Node 额外覆盖共享并发预算、根关闭、流取消/超时、显式取消、拒绝重定向以及压缩正文解码/大小限制。
+重建当前代码的 Java/Node/Python 制品和共享前端后，`node examples/smoke/local-test.mjs` 的四种服务各 13 项、共 52 项验收全部通过。
+本地使用 JDK 21 / release 17、Node 22.22.2、Python 3.11；未连接真实平台，平台侧权限行为仍以服务端实现为准。
+
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
 ## 多语言接入与体验优化
@@ -32,7 +55,7 @@ Node.js/Python 已提供独立客户端、模型和完整服务示例；验收�
 4. 验签使用原始正文和多值 Header；身份来自验签后的上下文及本地信任记录，不从 `event.data` 或 `subject` 推断应用。
    通知事务、去重和生命周期处理成功后才返回成功；应用存储仍由业务选择，示例给出完整持久实现。
 5. 三种语言保持相同线上协议及错误边界，不强求类结构相同。Node.js 22+、Python 3.11+；
-   Node 使用原生 HTTP/crypto 能力及成熟十进制编解码库，Python 使用 httpx、cryptography 及支持 Decimal 的 JSON 编解码。
+   Node 使用 Undici HTTP 传输、原生 crypto 及成熟十进制编解码库，Python 使用 httpx、cryptography 及支持 Decimal 的 JSON 编解码。
    计量值保留精确十进制，线上仍为契约中的 JSON number，不能默默改成字符串或先转为浮点数。
 
 ### 开发任务与顺序

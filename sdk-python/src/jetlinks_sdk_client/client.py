@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from .asset_scope import configure_scope, scope_headers
+
 from .models import (
     ApplicationState,
     AuthorizationContext,
@@ -127,13 +129,29 @@ class _Client:
     asynchronous = False
 
     def __init__(
-        self, base_url, token="", timeout=30, max_bytes=1048576, max_concurrency=32
+        self,
+        base_url,
+        token="",
+        timeout=30,
+        max_bytes=1048576,
+        max_concurrency=32,
+        *,
+        _source=None,
+        _asset_scopes=None,
     ):
+        self._closed, self._owned = False, None
+        self._asset_scopes = _asset_scopes or {}
+        self._root = _source._root if _source is not None else self
+        if _source is not None:
+            self.base_url = _source.base_url
+            self.token_provider = _source.token_provider
+            self.max_bytes = _source.max_bytes
+            self._http, self._budget = _source._http, _source._budget
+            return
         target(base_url, "/")
         if min(timeout, max_bytes, max_concurrency) < 1:
             raise SdkError("INVALID_ARGUMENT", "Invalid client limits")
         self.base_url, self.token_provider, self.max_bytes = base_url, token, max_bytes
-        self._closed, self._owned = False, None
         client = httpx.AsyncClient if self.asynchronous else httpx.Client
         self._http = client(
             timeout=timeout,
@@ -169,14 +187,39 @@ class _Client:
         result._owned = oauth
         return result
 
-    def _options(self, path, method, body, headers, query, token):
-        if self._closed:
+    def _ensure_open(self):
+        if self._closed or self._root._closed:
             raise SdkError("INVALID_STATE", "Client closed")
-        headers = {"Accept": "application/json", **(headers or {})}
+
+    def asset_scope(self, action):
+        """返回共享认证/连接/并发预算的范围视图；关闭视图不关闭根客户端。"""
+        self._ensure_open()
+        return type(self)(
+            self.base_url,
+            _source=self,
+            _asset_scopes=configure_scope(self._asset_scopes, action),
+        )
+
+    def _options(
+        self,
+        path,
+        method,
+        body,
+        headers,
+        query,
+        token,
+        asset_scope=None,
+        accept="application/json",
+    ):
+        self._ensure_open()
+        headers = scope_headers(self._asset_scopes, headers, asset_scope, accept)
         if token:
-            headers["Authorization"] = "Bearer " + token
-        if body is not None and not any(k.lower() == "content-type" for k in headers):
-            headers["Content-Type"] = "application/json"
+            headers = [(k, v) for k, v in headers if k.lower() != "authorization"]
+            headers.append(("Authorization", "Bearer " + token))
+        if body is not None and not any(
+            k.lower() == "content-type" for k, _ in headers
+        ):
+            headers.append(("Content-Type", "application/json"))
         content = (
             None
             if body is None
@@ -230,13 +273,17 @@ class JetLinksClient(_Client):
         query=None,
         raw=False,
         model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
             else self.token_provider.token()
         )
-        method, url, options = self._options(path, method, body, headers, query, token)
+        method, url, options = self._options(
+            path, method, body, headers, query, token, asset_scope
+        )
         if not self._budget.acquire(blocking=False):
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
         try:
@@ -256,8 +303,17 @@ class JetLinksClient(_Client):
             self._budget.release()
 
     def stream(
-        self, path, *, method="GET", body=None, headers=None, query=None, model=None
+        self,
+        path,
+        *,
+        method="GET",
+        body=None,
+        headers=None,
+        query=None,
+        model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
@@ -267,9 +323,11 @@ class JetLinksClient(_Client):
             path,
             method,
             body,
-            {"Accept": "application/x-ndjson", **(headers or {})},
+            headers,
             query,
             token,
+            asset_scope,
+            "application/x-ndjson",
         )
         if not self._budget.acquire(blocking=False):
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
@@ -319,7 +377,11 @@ class JetLinksClient(_Client):
             index += 1
 
     def close(self):
+        if self._closed:
+            return
         self._closed = True
+        if self._root is not self:
+            return
         self._http.close()
         if self._owned:
             self._owned.close()
@@ -348,13 +410,17 @@ class AsyncJetLinksClient(_Client):
         query=None,
         raw=False,
         model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
             else await self.token_provider.token()
         )
-        method, url, options = self._options(path, method, body, headers, query, token)
+        method, url, options = self._options(
+            path, method, body, headers, query, token, asset_scope
+        )
         if self._budget.locked():
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
         async with self._budget:
@@ -373,8 +439,17 @@ class AsyncJetLinksClient(_Client):
                 raise SdkError("TRANSPORT", "Platform transport failed") from cause
 
     async def stream(
-        self, path, *, method="GET", body=None, headers=None, query=None, model=None
+        self,
+        path,
+        *,
+        method="GET",
+        body=None,
+        headers=None,
+        query=None,
+        model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
@@ -384,9 +459,11 @@ class AsyncJetLinksClient(_Client):
             path,
             method,
             body,
-            {"Accept": "application/x-ndjson", **(headers or {})},
+            headers,
             query,
             token,
+            asset_scope,
+            "application/x-ndjson",
         )
         if self._budget.locked():
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
@@ -439,7 +516,11 @@ class AsyncJetLinksClient(_Client):
             index += 1
 
     async def close(self):
+        if self._closed:
+            return
         self._closed = True
+        if self._root is not self:
+            return
         await self._http.aclose()
         if self._owned:
             await self._owned.close()

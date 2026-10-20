@@ -9,6 +9,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -36,6 +37,11 @@ public final class JetLinksClient implements AutoCloseable {
     public JetLinksClient(JetLinksReactiveClient reactive, Duration timeout) {
         this.reactive = reactive;
         this.timeout = timeout;
+    }
+
+    /** 返回共享认证和连接的独立范围视图；沿用当前同步超时。 */
+    public JetLinksClient assetScope(Consumer<AssetScope> action) {
+        return new JetLinksClient(reactive.assetScope(action), timeout);
     }
 
     private void blocking() {
