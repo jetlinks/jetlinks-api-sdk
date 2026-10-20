@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Readable, pipeline, type Transform } from "node:stream";
 import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib";
 import { request as httpRequest, Agent, type Dispatcher } from "undici";
+import { ApplicationVersion } from "./application-version.js";
 import {
   configureScope,
   scopeHeaders,
@@ -528,14 +529,18 @@ export class OAuth2 {
     this.transport.close();
   }
 }
-/** 仅缓存连接，不保存第二份应用状态；每次操作传入持久层读到的当前快照。 */
+/** 缓存连接与有界准入水位；每次操作传入持久层的当前快照，invalidate 不清除水位。 */
 export class ApplicationClients {
   private readonly entries = new Map<
     string,
-    { fingerprint: string; client: JetLinksClient }
+    { identity: string; fingerprint: string; client: JetLinksClient }
   >();
+  private readonly versions = new Map<string, ApplicationVersion>();
   private closed = false;
-  constructor(private readonly limit = 128) {}
+  constructor(private readonly limit = 128) {
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new SdkError("INVALID_ARGUMENT", "Invalid client limit");
+  }
   get(
     namespace: string,
     state: ApplicationState,
@@ -547,8 +552,23 @@ export class ApplicationClients {
       throw new SdkError("INVALID_STATE", "Client manager closed");
     if (!["local", "oauth2", "bearer"].includes(mode))
       throw new SdkError("INVALID_ARGUMENT", "Invalid auth mode");
+    state = { ...state };
+    const identity = encode([namespace, state.platformId, state.applicationId]);
+    const version = new ApplicationVersion(state);
+    const previous = this.versions.get(identity);
+    version.check(previous);
+    if (!previous && this.versions.size >= this.limit)
+      throw new SdkError(
+        "LIMIT_EXCEEDED",
+        "Application identity capacity reached",
+      );
+    this.versions.set(identity, version);
+    if (
+      !active(state) ||
+      (previous && previous.connection !== version.connection)
+    )
+      this.invalidateIdentity(identity);
     if (!active(state)) {
-      this.invalidate(namespace);
       throw new SdkError("INVALID_ARGUMENT", "Inactive application");
     }
     const sorted =
@@ -591,9 +611,17 @@ export class ApplicationClients {
             )
           : new JetLinksClient(state.apiBaseUrl!, { token: bearer });
     old?.client.close();
-    this.entries.set(key, { fingerprint, client });
+    this.entries.set(key, { identity, fingerprint, client });
     return client;
   }
+  private invalidateIdentity(identity: string): void {
+    for (const [key, entry] of this.entries)
+      if (entry.identity === identity) {
+        entry.client.close();
+        this.entries.delete(key);
+      }
+  }
+  /** 释放 namespace 的连接，保留版本水位，防止迟到快照回退。 */
   invalidate(namespace: string): void {
     for (const [key, entry] of this.entries)
       if (decode<unknown[]>(key)[0] === namespace) {
@@ -605,6 +633,7 @@ export class ApplicationClients {
     this.closed = true;
     for (const entry of this.entries.values()) entry.client.close();
     this.entries.clear();
+    this.versions.clear();
   }
 }
 export class BusinessApplications {

@@ -1,6 +1,7 @@
 """资产选择范围：不同维度取交集，不授予身份之外的权限。"""
 
 from types import MappingProxyType
+import inspect
 
 import httpx
 
@@ -43,7 +44,15 @@ def configure_scope(defaults, action):
         builder.scope(scope_type, scope_id)
     if not callable(action):
         raise SdkError("INVALID_ARGUMENT", "Expected asset scope callback")
-    action(builder)
+    result = action(builder)
+    if inspect.isawaitable(result):
+        # 仅释放尚未启动的原生协程；不取消调用方拥有的 Task/Future 或自定义 awaitable。
+        if (
+            inspect.iscoroutine(result)
+            and inspect.getcoroutinestate(result) == inspect.CORO_CREATED
+        ):
+            result.close()
+        raise SdkError("INVALID_ARGUMENT", "Asset scope callback must be synchronous")
     return MappingProxyType(dict(builder._values))
 
 

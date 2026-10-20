@@ -1,6 +1,6 @@
 import { SdkError } from "./protocol.js";
 
-export type AssetScopeConfigurer = (scope: AssetScope) => unknown;
+export type AssetScopeConfigurer = (scope: AssetScope) => AssetScope | void;
 
 /** 不同维度取交集，同维度后设置覆盖前设置；范围选择不授予权限。 */
 export class AssetScope {
@@ -47,7 +47,22 @@ export function configureScope(
   for (const [type, id] of defaults) builder.scope(type, id);
   if (typeof action !== "function")
     throw new SdkError("INVALID_ARGUMENT", "Expected asset scope callback");
-  action(builder);
+  const result: unknown = action(builder);
+  if (
+    result !== null &&
+    (typeof result === "object" || typeof result === "function") &&
+    typeof (result as PromiseLike<unknown>).then === "function"
+  ) {
+    const error = new SdkError(
+      "INVALID_ARGUMENT",
+      "Asset scope callback must be synchronous",
+    );
+    // 调用方可能已启动异步任务；观察拒绝并保留原始原因，不能发出范围不完整的请求。
+    void Promise.resolve(result).catch((cause: unknown) => {
+      error.cause = cause;
+    });
+    throw error;
+  }
   return builder.snapshot();
 }
 

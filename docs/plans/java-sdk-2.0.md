@@ -27,12 +27,22 @@ Node 额外覆盖共享并发预算、根关闭、流取消/超时、显式取�
 
 并发复用审查：已在 `docs/guides/examples.md#客户端并发与对象复用` 统一说明缓存对象、身份隔离、线程/事件循环边界、
 可变请求输入和关闭顺序，三个语言指南均链接该入口。范围视图的并发 Header 隔离、共享认证/预算和关闭行为复用上述验证。
-额外复现了现有客户端管理器的旧快照替换新客户端问题：revision 1 → 2 → 迟到 1 后，新客户端的 `assetScope` 报 `INVALID_STATE`。
-Node.js、Python 同步/异步通过公开 API 复现，Java `ApplicationClients.get` 存在相同的指纹替换路径。
-该问题属于快照准入顺序，尚未修复；不能把缓存锁或使用说明等同于版本校验。没有因此修改平台权限或引入本地权限缓存。
-另复现了异步配置回调的范围丢失：Node.js 的类型允许 async 回调，但运行时忽略 Promise；
-Python 也忽略回调的 awaitable。真实 HTTP 请求缺少预期的 `X-Asset-Scope`，平台仍按原身份权限执行。
-应增加类型约束与运行时拒绝异步回调，当前文档要求先在回调外等待组织/租户 ID 查询；该实现问题尚未修复。
+已修复两个公开 API 复现的问题：异步 Scope 回调导致范围丢失，以及 revision 1 → 2 → 迟到 1 替换并关闭新客户端。
+Node.js 配置器限定同步返回类型，运行时拒绝 Promise/thenable；Python 拒绝 awaitable，关闭未启动的原生 coroutine，
+不取消调用方已有 Task/Future。两种语言均在建立视图或发送请求前报 `INVALID_ARGUMENT`，不会发出范围不完整的请求。
+Node 观察已启动任务的拒绝并保留为错误 cause；业务先在回调外完成异步 ID 查询。
+
+Java、Node.js、Python 同步/异步管理器按 namespace、平台和应用保存有界准入元数据，不缓存第二份业务状态。
+先比较 `createdAt` 生命周期，同生命周期要求 `updatedAt` 与 `keyRevision` 分别不倒退；同版本内容冲突及删除后复活报 `INVALID_STATE`，
+同状态时间的删除优先。迟到快照不能替换或关闭新客户端，轮换/地址变化/新生命周期则使该身份所有旧连接失效。
+准入记录跨认证模式/授权 Scope 共用，`invalidate` 保留已观察水位，`close` 统一释放；记录数和连接数分别受构造参数 `limit` 限制。
+管理器无法推断未提供的禁用/删除事实，每次仍须从业务持久层读取当前合并快照；Bearer 更新和跨进程协调由业务负责。
+Python 异步轮换先移除全部旧连接，再等待关闭；调用方取消也完成关闭，不遗留后台任务或其他模式的旧连接。
+
+本轮集中验证：Java 完整 `mvn -o verify` 的 88 项、Node.js 23 项、Python 23 项测试全部通过，失败/错误/跳过为 0。
+新增回归覆盖真实 HTTP 零发送、TS 正/负向编译、独立版本维度、同版本冲突、启停/删除/重建、跨模式与平台隔离、有界水位及异步轮换取消。
+Java AOSP 格式与 core 依赖边界、Node/Python lint/格式均通过；Java 制品、npm tgz 和 Python sdist/wheel 构建成功。
+使用本轮 Java 制品、Node dist 与 Python 源码复跑四服务模拟平台验收，各 13 项、共 52 项全部通过；共享前端未变，复用此前构建。
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 

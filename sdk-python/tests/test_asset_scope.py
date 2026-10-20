@@ -1,5 +1,6 @@
 import asyncio
 import json
+import inspect
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -62,6 +63,56 @@ def platform():
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@pytest.mark.parametrize("client_type", [JetLinksClient, AsyncJetLinksClient])
+async def test_async_scope_rejected_before_http_without_abandoned_coroutine(
+    platform, client_type, recwarn
+):
+    base, seen = platform
+    root = client_type(base)
+    returned = []
+
+    async def configure(scope):
+        await asyncio.sleep(0)
+        scope.organization("late")
+
+    def callback(scope):
+        result = configure(scope)
+        returned.append(result)
+        return result
+
+    class Awaitable:
+        def __await__(self):
+            raise AssertionError("must not run caller-owned awaitable")
+
+    async def invoke(method, *args, **kwargs):
+        result = method(*args, **kwargs)
+        return await result if inspect.isawaitable(result) else result
+
+    try:
+        with pytest.raises(SdkError) as error:
+            root.asset_scope(callback)
+        assert error.value.code == "INVALID_ARGUMENT"
+        for action in (callback, lambda _: Awaitable()):
+            with pytest.raises(SdkError) as error:
+                await invoke(root.request, "/echo", asset_scope=action)
+            assert error.value.code == "INVALID_ARGUMENT"
+        task = asyncio.create_task(asyncio.sleep(0))
+        with pytest.raises(SdkError):
+            root.asset_scope(lambda _: task)
+        await task
+        assert not task.cancelled()
+        assert all(
+            inspect.getcoroutinestate(c) == inspect.CORO_CLOSED for c in returned
+        )
+        assert seen == []
+        assert await invoke(
+            root.request, "/echo", asset_scope=lambda s: s.organization("ready")
+        ) == ["org:ready"]
+        assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
+    finally:
+        await invoke(root.close)
 
 
 def test_sync_actual_wire_scope_views_and_lifecycle(platform):

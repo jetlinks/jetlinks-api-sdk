@@ -67,6 +67,50 @@ async function fixture(run) {
   }
 }
 
+test("async scope callbacks reject before HTTP; returned rejections remain observable", async () => {
+  await fixture(async (base, seen) => {
+    const root = new JetLinksClient(base);
+    const cause = new Error("lookup failed");
+    const callback = async (scope) => {
+      await Promise.resolve();
+      scope.organization("late");
+      throw cause;
+    };
+    try {
+      let rejected;
+      assert.throws(
+        () => root.assetScope(callback),
+        (error) => {
+          rejected = error;
+          return error.code === "INVALID_ARGUMENT";
+        },
+      );
+      await assert.rejects(root.request("/echo", { assetScope: callback }), {
+        code: "INVALID_ARGUMENT",
+      });
+      await assert.rejects(
+        root.request("/echo", {
+          assetScope: () => ({ then: (_resolve, reject) => reject(cause) }),
+        }),
+        { code: "INVALID_ARGUMENT" },
+      );
+      const stream = root.stream("/stream", { assetScope: callback });
+      await assert.rejects(stream.next(), { code: "INVALID_ARGUMENT" });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(rejected.cause, cause);
+      assert.equal(seen.length, 0);
+      assert.deepEqual(
+        await root.request("/echo", {
+          assetScope: (s) => s.organization("ready"),
+        }),
+        ["org:ready"],
+      );
+    } finally {
+      root.close();
+    }
+  });
+});
+
 test("actual repeated headers, precedence, independent views, pagination and helpers", async () => {
   await fixture(async (base, seen) => {
     const tokens = new CachedTokenProvider(async () => ({

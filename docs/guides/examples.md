@@ -57,13 +57,15 @@ public Flux<Device> devices(String orgId) {
 正常停服先停止接收新工作，取消/等待本应用的在途操作并释放流，再关闭根客户端/管理器及手动创建的 OAuth2 或外部连接池。
 关闭与新请求准入不能作为一次跨语言的原子事务使用；生命周期协调由根资源的拥有者负责。
 
-### 当前异步 Scope 配置限制
+### 同步 Scope 配置
 
-范围配置回调必须同步完成。当前 Node.js 的 `AssetScopeConfigurer` 返回类型为 `unknown`，会接受 `async` 回调，
-但实现未等待或拒绝其 Promise；Python 的配置回调返回 awaitable 时也会被忽略。
-如果在回调内异步获取组织 ID，再设置范围，SDK 可能已经复制空范围并发出不带 `X-Asset-Scope` 的请求。
-平台仍校验原身份权限，但请求不会按预期缩小到指定组织。此行为尚需 SDK 增加同步回调约束和运行时拒绝；
-目前应在回调之外先完成异步查询：
+范围配置回调必须同步完成。Node.js 的 `AssetScopeConfigurer` 允许同步 block 或返回 `AssetScope`，
+TypeScript 拒绝 Promise 返回值；运行时也拒绝 JavaScript/类型绕过传入的 Promise/thenable。
+Python 同步/异步客户端均拒绝 awaitable，并关闭尚未启动的原生 coroutine，避免未等待协程警告；
+调用方已有的 Task/Future 不会被取消，仍由调用方等待和处理失败。
+创建视图或消费请求/流时遇到异步配置报 `INVALID_ARGUMENT`，不会发送范围不完整的 HTTP 请求。
+Node 已启动的异步任务不能撤回，SDK 观察其拒绝以避免 unhandled rejection；若稍后失败，原始原因会写入所抛异常的 `cause`。
+应在回调之外先完成异步查询：
 
 ```js
 const orgId = await resolveOrganizationId();
@@ -74,11 +76,21 @@ Python 同理，先 `org_id = await resolve_organization_id()`，再传同步的
 
 ### 客户端管理器的版本顺序
 
-`ApplicationClients.get` 的锁或单事件循环保证缓存操作互斥，但目前只用指纹是否相等决定替换，不比较快照的新旧。
-若请求 A 先读到凭据 revision 1，B 读到 revision 2 并先执行 `get`，随后 A 把旧快照传入 `get`，
-旧快照仍会替换 revision 2 的客户端并关闭它。该风险也影响绑定其上的范围视图；加大缓存或再加同一把方法锁不能解决。
-生产使用时应把同一 namespace 的“读取当前快照 + get”与本地状态变更放入同一串行协调过程，
-避免把提前读取或来自旧缓存的状态迟到交给管理器。管理器本身仍需后续增加明确的生命周期/版本准入规则。
+管理器按 `(namespace, platformId, applicationId)` 记录生命周期、状态时间、凭据版本和内容摘要，跨认证模式及 OAuth2 Scope 共用。
+先比较 `createdAt`；较新的生命周期允许凭据版本重新从 1 开始。同一生命周期要求 `updatedAt` 和 `keyRevision` 分别不倒退，
+同时间的状态/地址或同凭据版本的密钥内容不能冲突。删除是终态，同一状态时间的删除优先于未删除快照。
+迟到、不可比较或内容冲突的快照报 `INVALID_STATE`，不替换或关闭当前客户端；应重新读取业务持久层的当前合并快照。
+不能靠本地修改时间或版本重试，也不要在 SDK 外把两个过期快照自行拼接成新状态。
+
+接受禁用/删除快照后关闭该身份的所有连接，并报 `INVALID_ARGUMENT`；旧的启用快照不能复活连接。
+生命周期、地址或凭据改变会关闭同身份所有认证模式/Scope 的旧连接，其他平台或应用不受影响。
+`invalidate(namespace)` 释放该 namespace 的全部连接并保留已观察到的水位；它不接收状态，也不会推断通知事务中的新版本。
+业务仍须在每次 `get` 传入权威持久层的当前快照，管理器不能发现未提供的禁用或删除事实，也不能跨进程同步水位。
+
+连接数及进程内已观察的身份数分别受构造参数 `limit`（默认 128）限制，包含已失效的身份记录；达到任一上限报 `LIMIT_EXCEEDED`。
+管理器生命周期内不淘汰版本水位，避免记录被淘汰后旧快照重新准入；按预计身份数配置上限，停服 `close` 时一起释放。
+管理器不保存第二份业务状态或权限缓存；新管理器仍从业务持久层取得当前快照。
+Bearer 字符串本身没有可比较的版本，同一 namespace 的用户会话/Token 更新由调用方协调，不应让不同会话共用一个 namespace。
 
 ## 本地完整验证
 
