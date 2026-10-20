@@ -39,6 +39,8 @@ try (JetLinksClient client = JetLinksClient.local(apiBaseUrl, accessKey, accessS
 
 自签 Token 的有效期须与平台配置一致，SDK 默认缓存 2 分钟。代码中的类型位于 `org.jetlinks.sdk.client` 和 `org.jetlinks.sdk.client.auth`。
 
+Java 快照发布到 JetLinks Nexus 私服，仓库配置与 CI 操作见 [Java 快照发布](docs/guides/java-sdk.md#7-构建与快照发布)。
+
 ## 运行 Example
 
 Java 示例需要 JDK 17+、Maven 3.6.3+；Node.js 示例需要 22.13+，Python 示例需要 3.11+。
@@ -108,4 +110,4 @@ node examples/smoke/local-test.mjs
 
 [Java 接入指南](docs/guides/java-sdk.md) · [Example 配置与测试](docs/guides/examples.md) · [1.x 迁移](docs/guides/migration.md) · [开发与验收范围](docs/plans/java-sdk-2.0.md)
 
-`2.0` 是不兼容的主版本；未提供旧版 `ApiClient`/hsweb DSL 兼容层。当前制品尚未发布到 Maven/npm/PyPI，请按语言指南从源码安装。
+`2.0` 是不兼容的主版本；未提供旧版 `ApiClient`/hsweb DSL 兼容层。Java SNAPSHOT 由合入后的 CI 发布至 Nexus；正式制品尚未发布到 Maven Central/npm/PyPI，请按语言指南安装。

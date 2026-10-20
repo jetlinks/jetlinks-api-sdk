@@ -312,3 +312,37 @@ jetlinks:
 Starter 基于 Spring Boot 3.5 / Java 17，自动发现配置并适配 MVC 或 WebFlux；MVC 使用 `jakarta.servlet`。核心 SDK 可独立于 Spring 使用。
 
 完整验收方式见 [Example 配置与验证](examples.md)。
+
+## 7. 构建与快照发布
+
+Java `*-SNAPSHOT` 通过 `.github/workflows/maven-publish.yml` 发布到 JetLinks Nexus。
+在仓库或已授权的组织 Secrets 中配置 `MAVEN_USERNAME`、`MAVEN_PASSWORD`，账号需要 `snapshots` 仓库的部署权限。
+`actions/setup-java` 生成服务 ID 为 `snapshots` 的 Maven settings，凭据不写入源码。
+
+推送到 `2.0` / `master` 后自动构建、测试并发布；也可在 Actions 的 **Publish Maven snapshots** 手动选择这两个分支。
+手动执行要求工作流文件已进入仓库默认分支。非 SNAPSHOT 版本会被拒绝；同一仓库的快照发布串行执行。
+
+根 POM 的 `publish` profile 固定发布插件版本并附带源码，使用以下命令只构建和发布核心、Starter 及其父 POM，示例不会上传：
+
+```sh
+mvn -B -ntp -Ppublish \
+  -pl sdk-java/sdk-client-core,sdk-java/sdk-client-spring-boot-starter -am clean deploy
+```
+
+本地执行时在 Maven `settings.xml` 的 `servers` 中配置同名 `snapshots` 服务及部署凭据。
+该命令保留全部所选模块的测试，并在整个 reactor 构建成功后才开始部署；远端传输失败仍需检查 Nexus 的实际上传状态。
+
+消费快照时，在项目 POM 或 Maven settings 的 profile 中添加仓库，再使用文首的依赖坐标：
+
+```xml
+<repositories>
+  <repository>
+    <id>snapshots</id>
+    <url>https://nexus.jetlinks.cn/content/repositories/snapshots/</url>
+    <releases><enabled>false</enabled></releases>
+    <snapshots><enabled>true</enabled></snapshots>
+  </repository>
+</repositories>
+```
+
+此工作流只发布 Java 快照，正式版本和 Node.js/Python 包仍按各自发布流程管理。

@@ -2,6 +2,22 @@
 
 状态：已实现，按用户确认使用独立本地模拟平台验收。当前基线为 Java 17 / Spring Boot 3.5，升级范围和验证见下文；未连接生产平台、未发布 Maven 制品。
 
+## Nexus 快照发布
+
+目标：参考工作区 `dev/jetlinks-sdk/.github/workflows/maven-publish.yml`，通过 GitHub Actions 将 Java 快照发布到
+`https://nexus.jetlinks.cn/content/repositories/snapshots/`，沿用服务 ID `snapshots` 和 Secrets
+`MAVEN_USERNAME` / `MAVEN_PASSWORD`。发布工作流在 `2.0` / `master` 推送时触发，也支持在这两个分支手动执行。
+
+范围为根 `pom.xml` 的 `publish` profile、`.github/workflows/maven-publish.yml` 及接入说明。
+实施：固定发布插件版本并附带源码；完整测试所选 Maven reactor 后，在末尾集中部署核心、Starter 及两个父 POM；
+通过 `-pl ... -am` 排除示例制品，非 SNAPSHOT 版本在部署前拒绝。Node.js/Python 的仓库发布及正式版本发布不在本项范围。
+
+验证：Actions `actionlint`、Maven profile XML、核心依赖边界及空白检查通过，版本读取为 `2.0.0-SNAPSHOT`。
+使用临时 Maven 缓存向 `file:///private/tmp/jetlinks-pr17-nexus-validation` 执行同一发布命令，所选模块 66 项测试通过，
+仅生成 `sdk-client-parent`、`sdk-client`、`sdk-client-core`、`sdk-client-spring-boot-starter` 四个坐标；两个库均含 JAR、POM 和源码，
+快照 metadata 可定位实际制品，上传发生在所有测试之后。日志为 `/private/tmp/jetlinks-pr17-publish.log`，本地 JDK 21 / release 17。
+复用未变化的多语言行为验证。真实 Nexus 写入由合入后的工作流执行，依赖仓库或组织提供发布 Secrets；本次没有触发远端发布。
+
 ## 多语言接入与体验优化
 
 状态：已按确认范围完成 M01—M06，并通过本地模拟平台验证。Java 接入简化、Node.js/Python SDK 与共用示例均已实现；下文原有 Java 阶段记录保留。
