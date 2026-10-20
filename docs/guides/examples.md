@@ -3,6 +3,95 @@
 两个 Java 服务共用 `example-common` 和 H2；Node.js、Python 各自调用本语言 SDK，使用示例层 SQLite。
 四种服务实现同一份 `examples/contract/openapi.yaml`，托管唯一的 `examples/shared-ui/dist`，配置结构相同。
 
+## 客户端并发与对象复用
+
+此节适用于 Java、Node.js、Python SDK。缓存的主要对象是持有认证和连接的根客户端或管理器；
+资产范围视图只复制最多 16 个范围，不创建连接池或 Token 缓存，通常在每次业务操作内创建即可。
+
+| 对象 | 推荐生命周期 | 复用边界 |
+| --- | --- | --- |
+| `ApplicationClients` / `AsyncApplicationClients` | 应用启动时创建，停服时统一关闭 | 单进程或单事件循环内复用；每次操作传当前应用快照获取客户端，不另存一份长期 Handle 缓存 |
+| 直接创建的根客户端 | 同一稳定身份长期复用；多身份使用有上限的管理器 | 按可信 API 地址、应用/用户身份、认证模式、凭据版本和 OAuth2 Scope 隔离；不能按组织 ID 或应用 ID 单独区分 |
+| 内置 `CachedTokenProvider` / `AsyncCachedTokenProvider` | 随根客户端复用 | 客户端工厂/管理器已创建缓存；不要每次请求重新创建 Provider，也不必在其外层再缓存 Token 字符串 |
+| 手动装配的 `OAuth2` 和机器 Token Provider | 随同一地址和凭据复用 | `machineTokens` / `machine_tokens` 创建一次 Provider 后复用；手动创建的 OAuth2 传输仍由调用方关闭 |
+| `assetScope` / `asset_scope` 返回的视图 | 默认操作内创建；固定范围可复用 | 共享根客户端的认证、连接和预算；若另设视图缓存，必须有上限，并绑定根客户端代数和完整范围，根替换时一起清理 |
+| `BusinessApplications` / `Subscriptions` | 按需创建 | 是绑定客户端和应用 ID 的轻量包装；固定绑定可复用，通常无需专门缓存；不能跨根客户端轮换长期保留 |
+| `ApiRequest`、`Query`、`AssetScope` 构造器、请求 options/body | 每次操作独立创建 | 是可变输入，不作为全局共享请求模板；发送、订阅或遍历期间不再修改其内容或嵌套对象 |
+| Publisher、Stream、generator / AsyncIterator | 每次操作独立获取和消费 | 不是客户端缓存；不要把一次响应/请求链缓存成跨用户、跨范围的全局结果，提前结束时及时取消或关闭 |
+
+OAuth2 Scope 的未指定与显式空集合语义不同。资产范围 Header 不改变 OAuth2 授权 Scope，
+不同组织/租户视图应共享同一身份的 Provider，不需要因此各申请一份 Token。
+自定义 Provider 必须自行满足并发调用契约；Java 还要求非阻塞，Python 异步 Provider 限于所属事件循环。
+地址、凭据、OAuth2 Scope 集合和应用快照应作为稳定配置/独立值传入，不在并发请求之间原地修改。
+
+### 并发边界
+
+- Java 同步/响应式客户端和固定范围视图可供多个请求复用；内置 Token 缓存合并并发刷新，范围快照互不修改。
+  `JetLinksClient` 的阻塞方法不能在 Reactor/Netty 非阻塞线程调用。自定义 TokenProvider 的线程安全由实现者保证。
+- Node.js 客户端、视图和管理器可在同一个事件循环内并发发起 Promise/异步迭代调用；各 Worker 或进程独立创建自己的根客户端。
+- Python 同步客户端配合内置同步 Provider 可跨线程复用。异步客户端、异步管理器和异步 Provider 只在同一事件循环内复用，
+  不跨线程/多个 `asyncio.run` 共用，也不在异步处理器中直接调用同步 HTTP。
+- 同一根客户端的视图共享连接上限；Node.js/Python 还共享在途预算，不能通过大量创建视图绕开限制。
+- 创建视图时执行配置回调并复制范围；回调是同步配置，不启动异步任务或把 builder 放进全局变量。
+  请求级回调也应从本次操作的明确身份参数获取范围，不读取可被其他请求改写的全局“当前组织”。
+
+### 关闭与惰性执行
+
+根客户端由应用生命周期或管理器拥有。普通业务请求只借用它，不能在单次请求结束时关闭共享根客户端。
+管理器返回的 Java `Handle.client` 与 `Handle.sync` 使用同一根连接，不能分别关闭；凭据轮换/禁用/删除时由管理器统一失效。
+该替换会使旧视图失效，在途调用可能失败；SDK 不承诺轮换时请求无损完成，也不自动重放写请求。
+
+范围视图没有独立外部资源，临时视图可以随操作引用回收；显式 `close` 用于阻止该视图的后续调用，
+不等于等待或取消它已经开始的全部调用。不要用视图 `close` 代替取消 HTTP 订阅/流。
+冷 Publisher 和分页/流迭代器通常在订阅或遍历时才开始调用，不能先关闭视图再返回它们：
+
+```java
+// reactive 是应用长期复用的根客户端，在应用停服时关闭。
+public Flux<Device> devices(String orgId) {
+    var scoped = reactive.assetScope(scope -> scope.organization(orgId));
+    return scoped.pages("/device-instance/_query", new Query(), Device.class);
+}
+// 不要在 try-with-resources 中关闭 scoped 后再返回尚未订阅的 Flux。
+```
+
+正常停服先停止接收新工作，取消/等待本应用的在途操作并释放流，再关闭根客户端/管理器及手动创建的 OAuth2 或外部连接池。
+关闭与新请求准入不能作为一次跨语言的原子事务使用；生命周期协调由根资源的拥有者负责。
+
+### 同步 Scope 配置
+
+范围配置回调必须同步完成。Node.js 的 `AssetScopeConfigurer` 允许同步 block 或返回 `AssetScope`，
+TypeScript 拒绝 Promise 返回值；运行时也拒绝 JavaScript/类型绕过传入的 Promise/thenable。
+Python 同步/异步客户端均拒绝 awaitable，并关闭尚未启动的原生 coroutine，避免未等待协程警告；
+调用方已有的 Task/Future 不会被取消，仍由调用方等待和处理失败。
+创建视图或消费请求/流时遇到异步配置报 `INVALID_ARGUMENT`，不会发送范围不完整的 HTTP 请求。
+Node 已启动的异步任务不能撤回，SDK 观察其拒绝以避免 unhandled rejection；若稍后失败，原始原因会写入所抛异常的 `cause`。
+应在回调之外先完成异步查询：
+
+```js
+const orgId = await resolveOrganizationId();
+await client.request('/your/api', { assetScope: scope => scope.organization(orgId) });
+```
+
+Python 同理，先 `org_id = await resolve_organization_id()`，再传同步的 `lambda scope: scope.organization(org_id)`。
+
+### 客户端管理器的版本顺序
+
+管理器按 `(namespace, platformId, applicationId)` 记录生命周期、状态时间、凭据版本和内容摘要，跨认证模式及 OAuth2 Scope 共用。
+先比较 `createdAt`；较新的生命周期允许凭据版本重新从 1 开始。同一生命周期要求 `updatedAt` 和 `keyRevision` 分别不倒退，
+同时间的状态/地址或同凭据版本的密钥内容不能冲突。删除是终态，同一状态时间的删除优先于未删除快照。
+迟到、不可比较或内容冲突的快照报 `INVALID_STATE`，不替换或关闭当前客户端；应重新读取业务持久层的当前合并快照。
+不能靠本地修改时间或版本重试，也不要在 SDK 外把两个过期快照自行拼接成新状态。
+
+接受禁用/删除快照后关闭该身份的所有连接，并报 `INVALID_ARGUMENT`；旧的启用快照不能复活连接。
+生命周期、地址或凭据改变会关闭同身份所有认证模式/Scope 的旧连接，其他平台或应用不受影响。
+`invalidate(namespace)` 释放该 namespace 的全部连接并保留已观察到的水位；它不接收状态，也不会推断通知事务中的新版本。
+业务仍须在每次 `get` 传入权威持久层的当前快照，管理器不能发现未提供的禁用或删除事实，也不能跨进程同步水位。
+
+连接数及进程内已观察的身份数分别受构造参数 `limit`（默认 128）限制，包含已失效的身份记录；达到任一上限报 `LIMIT_EXCEEDED`。
+管理器生命周期内不淘汰版本水位，避免记录被淘汰后旧快照重新准入；按预计身份数配置上限，停服 `close` 时一起释放。
+管理器不保存第二份业务状态或权限缓存；新管理器仍从业务持久层取得当前快照。
+Bearer 字符串本身没有可比较的版本，同一 namespace 的用户会话/Token 更新由调用方协调，不应让不同会话共用一个 namespace。
+
 ## 本地完整验证
 
 从根目录执行（JDK 17+、Maven 3.6.3+、Node.js 22.13+、Python 3.11+）：

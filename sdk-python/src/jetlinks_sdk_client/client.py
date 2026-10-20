@@ -6,9 +6,12 @@ import hashlib
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
+
+from .asset_scope import configure_scope, scope_headers
+from .application_version import ApplicationVersion
 
 from .models import (
     ApplicationState,
@@ -127,13 +130,29 @@ class _Client:
     asynchronous = False
 
     def __init__(
-        self, base_url, token="", timeout=30, max_bytes=1048576, max_concurrency=32
+        self,
+        base_url,
+        token="",
+        timeout=30,
+        max_bytes=1048576,
+        max_concurrency=32,
+        *,
+        _source=None,
+        _asset_scopes=None,
     ):
+        self._closed, self._owned = False, None
+        self._asset_scopes = _asset_scopes or {}
+        self._root = _source._root if _source is not None else self
+        if _source is not None:
+            self.base_url = _source.base_url
+            self.token_provider = _source.token_provider
+            self.max_bytes = _source.max_bytes
+            self._http, self._budget = _source._http, _source._budget
+            return
         target(base_url, "/")
         if min(timeout, max_bytes, max_concurrency) < 1:
             raise SdkError("INVALID_ARGUMENT", "Invalid client limits")
         self.base_url, self.token_provider, self.max_bytes = base_url, token, max_bytes
-        self._closed, self._owned = False, None
         client = httpx.AsyncClient if self.asynchronous else httpx.Client
         self._http = client(
             timeout=timeout,
@@ -169,14 +188,39 @@ class _Client:
         result._owned = oauth
         return result
 
-    def _options(self, path, method, body, headers, query, token):
-        if self._closed:
+    def _ensure_open(self):
+        if self._closed or self._root._closed:
             raise SdkError("INVALID_STATE", "Client closed")
-        headers = {"Accept": "application/json", **(headers or {})}
+
+    def asset_scope(self, action):
+        """返回共享认证/连接/并发预算的范围视图；关闭视图不关闭根客户端。"""
+        self._ensure_open()
+        return type(self)(
+            self.base_url,
+            _source=self,
+            _asset_scopes=configure_scope(self._asset_scopes, action),
+        )
+
+    def _options(
+        self,
+        path,
+        method,
+        body,
+        headers,
+        query,
+        token,
+        asset_scope=None,
+        accept="application/json",
+    ):
+        self._ensure_open()
+        headers = scope_headers(self._asset_scopes, headers, asset_scope, accept)
         if token:
-            headers["Authorization"] = "Bearer " + token
-        if body is not None and not any(k.lower() == "content-type" for k in headers):
-            headers["Content-Type"] = "application/json"
+            headers = [(k, v) for k, v in headers if k.lower() != "authorization"]
+            headers.append(("Authorization", "Bearer " + token))
+        if body is not None and not any(
+            k.lower() == "content-type" for k, _ in headers
+        ):
+            headers.append(("Content-Type", "application/json"))
         content = (
             None
             if body is None
@@ -230,13 +274,17 @@ class JetLinksClient(_Client):
         query=None,
         raw=False,
         model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
             else self.token_provider.token()
         )
-        method, url, options = self._options(path, method, body, headers, query, token)
+        method, url, options = self._options(
+            path, method, body, headers, query, token, asset_scope
+        )
         if not self._budget.acquire(blocking=False):
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
         try:
@@ -256,8 +304,17 @@ class JetLinksClient(_Client):
             self._budget.release()
 
     def stream(
-        self, path, *, method="GET", body=None, headers=None, query=None, model=None
+        self,
+        path,
+        *,
+        method="GET",
+        body=None,
+        headers=None,
+        query=None,
+        model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
@@ -267,9 +324,11 @@ class JetLinksClient(_Client):
             path,
             method,
             body,
-            {"Accept": "application/x-ndjson", **(headers or {})},
+            headers,
             query,
             token,
+            asset_scope,
+            "application/x-ndjson",
         )
         if not self._budget.acquire(blocking=False):
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
@@ -319,7 +378,11 @@ class JetLinksClient(_Client):
             index += 1
 
     def close(self):
+        if self._closed:
+            return
         self._closed = True
+        if self._root is not self:
+            return
         self._http.close()
         if self._owned:
             self._owned.close()
@@ -348,13 +411,17 @@ class AsyncJetLinksClient(_Client):
         query=None,
         raw=False,
         model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
             else await self.token_provider.token()
         )
-        method, url, options = self._options(path, method, body, headers, query, token)
+        method, url, options = self._options(
+            path, method, body, headers, query, token, asset_scope
+        )
         if self._budget.locked():
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
         async with self._budget:
@@ -373,8 +440,17 @@ class AsyncJetLinksClient(_Client):
                 raise SdkError("TRANSPORT", "Platform transport failed") from cause
 
     async def stream(
-        self, path, *, method="GET", body=None, headers=None, query=None, model=None
+        self,
+        path,
+        *,
+        method="GET",
+        body=None,
+        headers=None,
+        query=None,
+        model=None,
+        asset_scope=None,
     ):
+        self._ensure_open()
         token = (
             self.token_provider
             if isinstance(self.token_provider, str)
@@ -384,9 +460,11 @@ class AsyncJetLinksClient(_Client):
             path,
             method,
             body,
-            {"Accept": "application/x-ndjson", **(headers or {})},
+            headers,
             query,
             token,
+            asset_scope,
+            "application/x-ndjson",
         )
         if self._budget.locked():
             raise SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded")
@@ -439,7 +517,11 @@ class AsyncJetLinksClient(_Client):
             index += 1
 
     async def close(self):
+        if self._closed:
+            return
         self._closed = True
+        if self._root is not self:
+            return
         await self._http.aclose()
         if self._owned:
             await self._owned.close()
@@ -703,12 +785,15 @@ class Subscriptions:
 
 
 class ApplicationClients:
-    """有界同步客户端复用；每次 get 必须传入业务持久层的当前应用快照。"""
+    """有界连接和版本水位；传入当前持久化快照，invalidate 保留水位。"""
 
     client_type = JetLinksClient
 
     def __init__(self, limit=128):
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise SdkError("INVALID_ARGUMENT", "Invalid client limit")
         self.limit, self.entries, self.closed = limit, {}, False
+        self._versions = {}
         self._lock = threading.RLock()
 
     def get(
@@ -720,15 +805,27 @@ class ApplicationClients:
     def _get(self, namespace, state, mode, scopes, bearer):
         if self.closed:
             raise SdkError("INVALID_STATE", "Client manager closed")
+        if mode not in ("local", "oauth2", "bearer"):
+            raise SdkError("INVALID_ARGUMENT", "Invalid auth mode")
+        state = replace(state)
+        identity = namespace, state.platformId, state.applicationId
+        version = ApplicationVersion.of(state)
+        previous = self._versions.get(identity)
+        version.check(previous)
+        if previous is None and len(self._versions) >= self.limit:
+            raise SdkError("LIMIT_EXCEEDED", "Application identity capacity reached")
+        self._versions[identity] = version
+        if not state.active or (previous and previous.connection != version.connection):
+            self._invalidate_identity(identity)
         if not state.active:
-            self.invalidate(namespace)
             raise SdkError("INVALID_ARGUMENT", "Inactive application")
+        scopes = None if scopes is None else tuple(sorted(set(scopes)))
         key = (
             namespace,
             state.platformId,
             state.applicationId,
             mode,
-            None if scopes is None else tuple(sorted(set(scopes))),
+            scopes,
         )
         fingerprint = (
             state.createdAt,
@@ -753,12 +850,15 @@ class ApplicationClients:
             )
         elif mode == "bearer":
             client = self.client_type(state.apiBaseUrl, bearer)
-        else:
-            raise SdkError("INVALID_ARGUMENT", "Invalid auth mode")
         self.entries[key] = fingerprint, client
         if existing:
             existing[1].close()
         return client
+
+    def _invalidate_identity(self, identity):
+        for key in list(self.entries):
+            if key[:3] == identity:
+                self.entries.pop(key)[1].close()
 
     def invalidate(self, namespace):
         with self._lock:
@@ -772,28 +872,48 @@ class ApplicationClients:
             for _, client in self.entries.values():
                 client.close()
             self.entries.clear()
+            self._versions.clear()
 
 
 class AsyncApplicationClients:
     """异步连接管理器，替换/失效时等待旧连接关闭，不创建无主后台关闭任务。"""
 
     def __init__(self, limit=128):
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise SdkError("INVALID_ARGUMENT", "Invalid client limit")
         self.limit, self.entries, self.closed = limit, {}, False
+        self._versions = {}
         self._lock = asyncio.Lock()
 
     async def get(self, namespace, state, mode="oauth2", scopes=None, bearer=""):
         async with self._lock:
             if self.closed:
                 raise SdkError("INVALID_STATE", "Client manager closed")
+            if mode not in ("local", "oauth2", "bearer"):
+                raise SdkError("INVALID_ARGUMENT", "Invalid auth mode")
+            state = replace(state)
+            scopes = None if scopes is None else tuple(sorted(set(scopes)))
+            identity = namespace, state.platformId, state.applicationId
+            version = ApplicationVersion.of(state)
+            previous = self._versions.get(identity)
+            version.check(previous)
+            if previous is None and len(self._versions) >= self.limit:
+                raise SdkError(
+                    "LIMIT_EXCEEDED", "Application identity capacity reached"
+                )
+            self._versions[identity] = version
+            if not state.active or (
+                previous and previous.connection != version.connection
+            ):
+                await self._invalidate_identity(identity)
             if not state.active:
-                await self._invalidate(namespace)
                 raise SdkError("INVALID_ARGUMENT", "Inactive application")
             key = (
                 namespace,
                 state.platformId,
                 state.applicationId,
                 mode,
-                None if scopes is None else tuple(sorted(set(scopes))),
+                scopes,
             )
             fingerprint = (
                 state.createdAt,
@@ -818,17 +938,43 @@ class AsyncApplicationClients:
                 )
             elif mode == "bearer":
                 client = AsyncJetLinksClient(state.apiBaseUrl, bearer)
-            else:
-                raise SdkError("INVALID_ARGUMENT", "Invalid auth mode")
             self.entries[key] = fingerprint, client
             if existing:
                 await existing[1].close()
             return client
 
+    async def _invalidate_identity(self, identity):
+        await self._retire(lambda key: key[:3] == identity)
+
     async def _invalidate(self, namespace):
-        for key in list(self.entries):
-            if key[0] == namespace:
-                await self.entries.pop(key)[1].close()
+        await self._retire(lambda key: key[0] == namespace)
+
+    async def _retire(self, matches):
+        # 先原子移除所有旧代连接；调用方取消时仍等待关闭完成，不留下后台关闭任务。
+        retired = [
+            self.entries.pop(key)[1] for key in list(self.entries) if matches(key)
+        ]
+        if not retired:
+            return
+
+        async def close_all():
+            results = await asyncio.gather(
+                *(client.close() for client in retired), return_exceptions=True
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+
+        closing = asyncio.create_task(close_all())
+        cancelled = None
+        while not closing.done():
+            try:
+                await asyncio.shield(closing)
+            except asyncio.CancelledError as error:
+                cancelled = error
+        closing.result()
+        if cancelled is not None:
+            raise cancelled
 
     async def invalidate(self, namespace):
         async with self._lock:
@@ -837,9 +983,10 @@ class AsyncApplicationClients:
     async def close(self):
         async with self._lock:
             self.closed = True
-            for _, client in self.entries.values():
-                await client.close()
-            self.entries.clear()
+            try:
+                await self._retire(lambda _: True)
+            finally:
+                self._versions.clear()
 
 
 class SnapshotSynchronizer:

@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * 绑定单一可信地址和认证上下文的非阻塞客户端；默认管理自己的连接池，外部注入的连接池由调用方关闭。
@@ -41,6 +42,8 @@ public final class JetLinksReactiveClient implements AutoCloseable {
     private final Duration timeout;
     private final int maxBytes;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final JetLinksReactiveClient root;
+    private final Map<String, String> assetScopes;
 
     public JetLinksReactiveClient(String base, TokenProvider auth) {
         this(base, auth, null, Duration.ofSeconds(30), 1024 * 1024);
@@ -53,6 +56,8 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         this.auth = Objects.requireNonNull(auth);
         this.timeout = timeout;
         this.maxBytes = maxBytes;
+        this.root = this;
+        this.assetScopes = Collections.emptyMap();
         owned =
                 external == null
                         ? ConnectionProvider.builder("jetlinks-sdk")
@@ -68,13 +73,40 @@ public final class JetLinksReactiveClient implements AutoCloseable {
                         .responseTimeout(timeout);
     }
 
+    private JetLinksReactiveClient(JetLinksReactiveClient source, Map<String, String> scopes) {
+        base = source.base;
+        auth = source.auth;
+        http = source.http;
+        owned = null;
+        timeout = source.timeout;
+        maxBytes = source.maxBytes;
+        root = source.root;
+        assetScopes = scopes;
+    }
+
+    /** 返回共享认证和连接的独立范围视图；关闭视图不关闭根客户端。 */
+    public JetLinksReactiveClient assetScope(Consumer<AssetScope> action) {
+        ensureOpen();
+        return new JetLinksReactiveClient(this, AssetScope.configure(assetScopes, action));
+    }
+
+    private void ensureOpen() {
+        if (closed.get() || root.closed.get())
+            throw new SdkException(Code.INVALID_STATE, "Client closed");
+    }
+
     private HttpClient.RequestSender sender(ApiRequest request, String token) {
-        if (closed.get()) throw new SdkException(Code.INVALID_STATE, "Client closed");
+        ensureOpen();
         return http.headers(
                         h -> {
+                            List<String> scopes =
+                                    request.assetScopeHeaders(
+                                            assetScopes, h.getAll(AssetScope.HEADER));
                             h.set("Accept", "application/json");
                             if (request.body != null) h.set("Content-Type", "application/json");
                             request.headers.forEach(h::set);
+                            h.remove(AssetScope.HEADER);
+                            scopes.forEach(value -> h.add(AssetScope.HEADER, value));
                             if (!token.isEmpty()) h.set("Authorization", "Bearer " + token);
                         })
                 .request(HttpMethod.valueOf(request.method))
@@ -83,7 +115,11 @@ public final class JetLinksReactiveClient implements AutoCloseable {
 
     /** 发送单次请求，保留原始状态和正文；Token 及网络操作在订阅时执行。 */
     public Mono<HttpResult> exchange(ApiRequest request) {
-        return Mono.defer(auth::token)
+        return Mono.defer(
+                        () -> {
+                            ensureOpen();
+                            return auth.token();
+                        })
                 .defaultIfEmpty("")
                 .flatMap(token -> exchangeResponse(request, token))
                 .timeout(timeout, Mono.error(JetLinksReactiveClient::requestTimeout));
@@ -146,7 +182,11 @@ public final class JetLinksReactiveClient implements AutoCloseable {
 
     /** 按 NDJSON 逐条返回，取消订阅会中止 HTTP 响应读取。 */
     public Flux<JsonNode> stream(ApiRequest request) {
-        return Mono.defer(auth::token)
+        return Mono.defer(
+                        () -> {
+                            ensureOpen();
+                            return auth.token();
+                        })
                 .defaultIfEmpty("")
                 .flatMapMany(token -> streamResponse(request, token))
                 .timeout(timeout, Flux.error(JetLinksReactiveClient::requestTimeout));
@@ -213,10 +253,10 @@ public final class JetLinksReactiveClient implements AutoCloseable {
         auth.invalidate();
     }
 
-    /** 关闭客户端并使认证缓存失效；仅释放由此客户端创建的连接池。 */
+    /** 关闭视图只阻止其后续调用；关闭根客户端还会失效共享认证并释放自建连接池。 */
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true)) {
+        if (closed.compareAndSet(false, true) && root == this) {
             auth.invalidate();
             if (owned != null) owned.dispose();
         }

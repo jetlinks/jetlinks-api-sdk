@@ -1,5 +1,30 @@
 # Node.js SDK
 
+## 资产范围
+
+生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：
+根客户端/管理器在同一事件循环内长期复用，options/body/迭代器按操作创建，临时范围视图通常无需额外缓存。
+
+```js
+await client.request('/your/api', {
+  assetScope: scope => scope.organization(orgId),
+});
+const scoped = client.assetScope(scope => scope
+  .tenant(tenantId).scope('org', orgId));
+try {
+  for await (const row of scoped.pages('/your/_query')) console.log(row);
+  await scoped.subscriptions(applicationId).events();
+} finally { scoped.close(); }
+```
+
+范围视图共享认证、连接及并发预算，不修改原客户端；关闭视图阻止后续调用，根客户端关闭后所有视图失效。
+普通请求、流、分页及业务/订阅 API 自动继承默认范围。不同类型取交集，同类型后设置覆盖前设置；
+请求 DSL 覆盖请求原始 Header，二者覆盖客户端同类型默认值。空值、首尾空白、控制字符、类型含冒号、
+超长值及超过 16 个类型抛出 `SdkError('INVALID_ARGUMENT', ...)`。类型最多 64、ID 最多 256 个 UTF-16 单元。
+可继续通过 `headers: { 'X-Asset-Scope': 'org:' + orgId }` 指定单个范围；多维范围使用 DSL。
+SDK 通过 Undici request 发送独立的重复 Header，避免 Fetch 把范围合并为逗号列表，并保留压缩响应解码。
+资产范围不会改变 OAuth2 授权 Scope 或 Token 缓存键。平台负责最终权限校验，指定范围不会增加身份权限，与平台强制范围冲突时仍会拒绝。
+
 Node.js 22+，ES module，附 TypeScript 类型。当前从源码安装；示例使用 Node.js 22.13+ 的内置 SQLite。
 
 从仓库根目录运行：
