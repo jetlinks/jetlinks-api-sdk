@@ -1,5 +1,29 @@
 # Python SDK
 
+## 资产范围
+
+生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：
+同步客户端可在线程间复用，异步客户端/管理器/Provider 只在所属事件循环内复用；临时范围视图通常无需额外缓存。
+
+```python
+client.request('/your/api', asset_scope=lambda scope: scope.organization(org_id))
+with client.asset_scope(lambda scope: scope.tenant(tenant_id).scope('org', org_id)) as scoped:
+    for row in scoped.pages('/your/_query'):
+        print(row)
+
+# 异步客户端使用相同配置回调
+async with async_client.asset_scope(lambda scope: scope.organization(org_id)) as scoped:
+    await scoped.subscriptions(application_id).events()
+```
+
+同步和异步 `request` / `stream` 均支持 `asset_scope` 参数。范围视图共享认证、连接和并发预算，不修改原客户端；
+分页和业务/订阅 API 继承视图默认范围。关闭视图阻止后续调用，关闭根客户端使所有视图失效。
+不同类型取交集；同类型后设置覆盖前设置，请求 DSL 优先于请求原始 Header，二者优先于客户端默认。
+空值、首尾空白、控制字符、类型含冒号、超长值及超过 16 个类型抛出 `SdkError`，code 为 `INVALID_ARGUMENT`。
+类型最多 64、ID 最多 256 个 UTF-16 单元。`organization` 对应 `org`，`tenant` 对应 `tenant`；
+每个范围以独立 `X-Asset-Scope: type:id` Header 发送，不能用逗号拼接。
+已有 `headers={'X-Asset-Scope': 'org:' + org_id}` 仍可用。资产范围不会改变 OAuth2 授权 Scope 或 Token 缓存键；平台负责最终权限校验，范围不会扩大原身份权限。
+
 Python 3.11+，同步与异步客户端共用签名、模型和精确 JSON。当前从源码安装，Web 服务依赖仅属于可选示例。
 
 从仓库根目录运行：

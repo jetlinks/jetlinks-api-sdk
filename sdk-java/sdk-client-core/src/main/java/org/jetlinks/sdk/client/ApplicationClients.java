@@ -9,7 +9,8 @@ import java.time.Duration;
 import java.util.*;
 
 /**
- * 根据业务提供的当前应用快照复用客户端；不保存应用状态，不主动查询平台。返回的连接由本管理器统一关闭。 每次业务操作前调用 get，禁用、删除或轮换后不得继续持有旧连接。
+ * 根据业务提供的当前应用快照复用客户端；只缓存连接及有界准入水位，不主动查询平台。返回的连接由本管理器统一关闭。 每次业务操作前调用
+ * get，禁用、删除或轮换后不得继续持有旧连接。invalidate 保留水位，避免旧快照重新创建连接。
  *
  * @since 2.0
  */
@@ -70,6 +71,7 @@ public final class ApplicationClients implements AutoCloseable {
     }
 
     private final Map<List<Object>, Handle> entries = new HashMap<>();
+    private final Map<List<Object>, ApplicationVersion> versions = new HashMap<>();
     private final int limit;
     private boolean closed;
 
@@ -102,8 +104,19 @@ public final class ApplicationClients implements AutoCloseable {
             throw new SdkException(SdkException.Code.INVALID_STATE, "Client manager closed");
         Objects.requireNonNull(namespace);
         Objects.requireNonNull(mode);
+        state = state.copy();
+        List<Object> identity = Arrays.asList(namespace, state.platformId, state.applicationId);
+        ApplicationVersion version = new ApplicationVersion(state);
+        ApplicationVersion previous = versions.get(identity);
+        version.check(previous);
+        if (previous == null && versions.size() >= limit)
+            throw new SdkException(
+                    SdkException.Code.LIMIT_EXCEEDED, "Application identity capacity reached");
+        versions.put(identity, version);
+        if (!state.active()
+                || (previous != null && !previous.connection.equals(version.connection)))
+            invalidateIdentity(identity);
         if (!state.active()) {
-            invalidate(namespace);
             throw new SdkException(
                     SdkException.Code.INVALID_ARGUMENT,
                     "Application is inactive or credentials are missing");
@@ -132,7 +145,17 @@ public final class ApplicationClients implements AutoCloseable {
         return replacement;
     }
 
-    /** 通知事务提交后失效本地通道的全部认证模式，不影响其他应用。 */
+    private void invalidateIdentity(List<Object> identity) {
+        entries.entrySet()
+                .removeIf(
+                        entry -> {
+                            if (!entry.getKey().subList(0, 3).equals(identity)) return false;
+                            entry.getValue().close();
+                            return true;
+                        });
+    }
+
+    /** 通知事务提交后失效本地通道的全部认证模式；保留版本水位，不影响其他 namespace。 */
     public synchronized void invalidate(String namespace) {
         entries.values()
                 .removeIf(
@@ -147,5 +170,6 @@ public final class ApplicationClients implements AutoCloseable {
         closed = true;
         entries.values().forEach(Handle::close);
         entries.clear();
+        versions.clear();
     }
 }

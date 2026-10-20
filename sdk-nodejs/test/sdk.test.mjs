@@ -254,7 +254,14 @@ test("application clients reuse, rotate, bound scope/region and close", async ()
   assert.notEqual(next, old);
   await assert.rejects(old.request("/test"), (e) => e.code === "INVALID_STATE");
   assert.throws(
-    () => cache.get("a", { ...current, enabled: false }),
+    () =>
+      cache.get("a", {
+        ...current,
+        keyRevision: 2,
+        accessSecret: "new",
+        updatedAt: 2,
+        enabled: false,
+      }),
     (e) => e.code === "INVALID_ARGUMENT",
   );
   cache.close();

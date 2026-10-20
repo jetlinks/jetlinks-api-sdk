@@ -4,6 +4,7 @@ import org.jetlinks.sdk.client.SdkException.Code;
 
 import java.net.*;
 import java.util.*;
+import java.util.function.Consumer;
 
 /**
  * 单次调用的可变请求构造器，提交后不可继续修改；相对路径不能替换客户端绑定的可信地址。
@@ -15,6 +16,21 @@ public final class ApiRequest {
     public final Map<String, String> headers = new LinkedHashMap<>(), query = new LinkedHashMap<>();
     public Object body;
     public boolean unwrap = true;
+    private Map<String, String> assetScopes = Collections.emptyMap();
+
+    /** 设置此请求的资产范围；按维度覆盖客户端默认值，保留其他维度。 */
+    public ApiRequest assetScope(Consumer<AssetScope> action) {
+        assetScopes = AssetScope.configure(assetScopes, action);
+        return this;
+    }
+
+    List<String> assetScopeHeaders(Map<String, String> defaults) {
+        return assetScopeHeaders(defaults, Collections.emptyList());
+    }
+
+    List<String> assetScopeHeaders(Map<String, String> defaults, List<String> inherited) {
+        return AssetScope.headers(inherited, defaults, headers, assetScopes);
+    }
 
     private ApiRequest(String method, String path) {
         if (!path.startsWith("/")

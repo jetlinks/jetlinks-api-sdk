@@ -1,4 +1,13 @@
 import crypto from "node:crypto";
+import { Readable, pipeline, type Transform } from "node:stream";
+import { createGunzip, createInflate, createBrotliDecompress } from "node:zlib";
+import { request as httpRequest, Agent, type Dispatcher } from "undici";
+import { ApplicationVersion } from "./application-version.js";
+import {
+  configureScope,
+  scopeHeaders,
+  type AssetScopeConfigurer,
+} from "./asset-scope.js";
 import {
   SdkError,
   decode,
@@ -91,6 +100,36 @@ export interface RequestOptions {
   query?: Record<string, string>;
   raw?: boolean;
   signal?: AbortSignal;
+  /** 按维度覆盖客户端默认资产范围。 */
+  assetScope?: AssetScopeConfigurer;
+}
+
+// Fetch 会把重复 Header 合并为逗号列表；request 保留各维度独立的线上 Header。
+interface PlatformResponse {
+  status: number;
+  ok: boolean;
+  body: ReadableStream<Uint8Array>;
+}
+function responseBody(
+  body: Readable,
+  encoding: string | string[] | undefined,
+): ReadableStream<Uint8Array> {
+  const transforms: Transform[] = [];
+  for (const name of String(encoding ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value && value !== "identity")
+    .reverse()) {
+    if (name === "gzip" || name === "x-gzip") transforms.push(createGunzip());
+    else if (name === "deflate") transforms.push(createInflate());
+    else if (name === "br") transforms.push(createBrotliDecompress());
+    else return Readable.toWeb(body) as ReadableStream<Uint8Array>;
+  }
+  // pipeline 双向传递解压错误和取消，响应/单行大小限制作用于解压后的数据。
+  if (transforms.length) pipeline([body, ...transforms], () => {});
+  return Readable.toWeb(
+    transforms.at(-1) ?? body,
+  ) as ReadableStream<Uint8Array>;
 }
 export interface ClientOptions {
   token?: string | TokenProvider;
@@ -100,7 +139,16 @@ export interface ClientOptions {
 }
 /** 可信地址绑定客户端；不跟随重定向、不重试带副作用请求。close 会取消在途传输。 */
 export class JetLinksClient {
-  private readonly controllers = new Set<AbortController>();
+  private shared: {
+    controllers: Set<AbortController>;
+    closed: boolean;
+    transport?: Agent;
+  } = {
+    controllers: new Set<AbortController>(),
+    closed: false,
+  };
+  private owner = true;
+  private assetScopes: ReadonlyMap<string, string> = new Map();
   private closed = false;
   readonly timeout: number;
   readonly maxBytes: number;
@@ -118,6 +166,24 @@ export class JetLinksClient {
     this.tokenProvider = options.token ?? "";
     if (Math.min(this.timeout, this.maxBytes, this.maxConcurrency) < 1)
       throw new SdkError("INVALID_ARGUMENT", "Invalid client limits");
+  }
+  /** 独立范围视图共享 Token、连接与并发预算；关闭视图不关闭根客户端。 */
+  assetScope(action: AssetScopeConfigurer): JetLinksClient {
+    this.ensureOpen();
+    const view = new JetLinksClient(this.baseUrl, {
+      token: this.tokenProvider,
+      timeout: this.timeout,
+      maxBytes: this.maxBytes,
+      maxConcurrency: this.maxConcurrency,
+    });
+    view.shared = this.shared;
+    view.owner = false;
+    view.assetScopes = configureScope(this.assetScopes, action);
+    return view;
+  }
+  private ensureOpen(): void {
+    if (this.closed || this.shared.closed)
+      throw new SdkError("INVALID_STATE", "Client closed");
   }
   static local(
     base: string,
@@ -152,47 +218,61 @@ export class JetLinksClient {
     path: string,
     options: RequestOptions,
   ): Promise<{
-    response: Response;
+    response: PlatformResponse;
     finish: () => void;
     controller: AbortController;
   }> {
+    this.ensureOpen();
     const url = target(this.baseUrl, path, options.query);
+    const headers = scopeHeaders(
+      this.assetScopes,
+      options.headers,
+      options.assetScope,
+    );
     const token =
       typeof this.tokenProvider === "string"
         ? this.tokenProvider
         : await this.tokenProvider.token();
-    if (this.closed) throw new SdkError("INVALID_STATE", "Client closed");
-    if (this.controllers.size >= this.maxConcurrency)
+    this.ensureOpen();
+    if (this.shared.controllers.size >= this.maxConcurrency)
       throw new SdkError("LIMIT_EXCEEDED", "Client concurrency exceeded");
     const controller = new AbortController();
-    this.controllers.add(controller);
+    this.shared.controllers.add(controller);
     const abort = () => controller.abort(options.signal?.reason);
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) abort();
     const finish = () => {
-      this.controllers.delete(controller);
+      this.shared.controllers.delete(controller);
       options.signal?.removeEventListener("abort", abort);
     };
     const timer = setTimeout(() => controller.abort(), this.timeout);
     try {
-      const headers = new globalThis.Headers(options.headers);
-      if (!headers.has("Accept")) headers.set("Accept", "application/json");
-      if (token) headers.set("Authorization", "Bearer " + token);
+      if (!("accept" in headers)) headers.accept = "application/json";
+      if (token) headers.authorization = "Bearer " + token;
       const body =
         options.body === undefined
           ? undefined
           : typeof options.body === "string"
             ? options.body
             : encode(options.body);
-      if (body !== undefined && !headers.has("Content-Type"))
-        headers.set("Content-Type", "application/json");
-      const response = await fetch(url, {
-        method: options.method ?? "GET",
+      if (body !== undefined && !("content-type" in headers))
+        headers["content-type"] = "application/json";
+      const result = await httpRequest(url, {
+        dispatcher: (this.shared.transport ??= new Agent({
+          connections: this.maxConcurrency,
+        })),
+        method: (options.method ?? "GET") as Dispatcher.HttpMethod,
         headers,
         body,
-        redirect: "manual",
+        headersTimeout: this.timeout,
+        bodyTimeout: this.timeout,
         signal: controller.signal,
       });
+      const response: PlatformResponse = {
+        status: result.statusCode,
+        ok: result.statusCode >= 200 && result.statusCode < 300,
+        body: responseBody(result.body, result.headers["content-encoding"]),
+      };
       return { response, finish, controller };
     } catch (cause) {
       finish();
@@ -208,7 +288,7 @@ export class JetLinksClient {
     }
   }
   private async *bytes(
-    response: Response,
+    response: PlatformResponse,
     controller: AbortController,
   ): AsyncGenerator<Uint8Array> {
     const reader = response.body?.getReader();
@@ -238,7 +318,11 @@ export class JetLinksClient {
       reader.releaseLock();
     }
   }
-  private unwrap<T>(response: Response, value: unknown, raw = false): T {
+  private unwrap<T>(
+    response: PlatformResponse,
+    value: unknown,
+    raw = false,
+  ): T {
     const doc = value as { status?: number; result?: unknown } | null;
     if (
       !response.ok ||
@@ -338,9 +422,13 @@ export class JetLinksClient {
     return new Subscriptions(this, id);
   }
   close(): void {
+    if (this.closed) return;
     this.closed = true;
-    for (const controller of this.controllers) controller.abort();
-    this.controllers.clear();
+    if (!this.owner) return;
+    this.shared.closed = true;
+    for (const controller of this.shared.controllers) controller.abort();
+    this.shared.controllers.clear();
+    void this.shared.transport?.destroy().catch(() => {});
     this.owned?.close();
     if (typeof this.tokenProvider !== "string")
       this.tokenProvider.invalidate?.();
@@ -441,14 +529,18 @@ export class OAuth2 {
     this.transport.close();
   }
 }
-/** 仅缓存连接，不保存第二份应用状态；每次操作传入持久层读到的当前快照。 */
+/** 缓存连接与有界准入水位；每次操作传入持久层的当前快照，invalidate 不清除水位。 */
 export class ApplicationClients {
   private readonly entries = new Map<
     string,
-    { fingerprint: string; client: JetLinksClient }
+    { identity: string; fingerprint: string; client: JetLinksClient }
   >();
+  private readonly versions = new Map<string, ApplicationVersion>();
   private closed = false;
-  constructor(private readonly limit = 128) {}
+  constructor(private readonly limit = 128) {
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new SdkError("INVALID_ARGUMENT", "Invalid client limit");
+  }
   get(
     namespace: string,
     state: ApplicationState,
@@ -460,8 +552,23 @@ export class ApplicationClients {
       throw new SdkError("INVALID_STATE", "Client manager closed");
     if (!["local", "oauth2", "bearer"].includes(mode))
       throw new SdkError("INVALID_ARGUMENT", "Invalid auth mode");
+    state = { ...state };
+    const identity = encode([namespace, state.platformId, state.applicationId]);
+    const version = new ApplicationVersion(state);
+    const previous = this.versions.get(identity);
+    version.check(previous);
+    if (!previous && this.versions.size >= this.limit)
+      throw new SdkError(
+        "LIMIT_EXCEEDED",
+        "Application identity capacity reached",
+      );
+    this.versions.set(identity, version);
+    if (
+      !active(state) ||
+      (previous && previous.connection !== version.connection)
+    )
+      this.invalidateIdentity(identity);
     if (!active(state)) {
-      this.invalidate(namespace);
       throw new SdkError("INVALID_ARGUMENT", "Inactive application");
     }
     const sorted =
@@ -504,9 +611,17 @@ export class ApplicationClients {
             )
           : new JetLinksClient(state.apiBaseUrl!, { token: bearer });
     old?.client.close();
-    this.entries.set(key, { fingerprint, client });
+    this.entries.set(key, { identity, fingerprint, client });
     return client;
   }
+  private invalidateIdentity(identity: string): void {
+    for (const [key, entry] of this.entries)
+      if (entry.identity === identity) {
+        entry.client.close();
+        this.entries.delete(key);
+      }
+  }
+  /** 释放 namespace 的连接，保留版本水位，防止迟到快照回退。 */
   invalidate(namespace: string): void {
     for (const [key, entry] of this.entries)
       if (decode<unknown[]>(key)[0] === namespace) {
@@ -518,6 +633,7 @@ export class ApplicationClients {
     this.closed = true;
     for (const entry of this.entries.values()) entry.client.close();
     this.entries.clear();
+    this.versions.clear();
   }
 }
 export class BusinessApplications {
