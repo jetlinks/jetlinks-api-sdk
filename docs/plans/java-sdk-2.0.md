@@ -12,6 +12,7 @@
 本地验证：Node.js 22.22.2 下，lint、25 项测试、版本/渠道及 CLI 拒绝边界、actionlint 和空白检查通过；
 使用 npm 11.21.1 的 pack 与 publish dry-run 通过，18 个包文件仅含运行代码、声明、README 和包元数据；独立项目安装 tgz 后，运行时导入与严格 NodeNext TypeScript 编译通过。
 实际公开发布和 OIDC/provenance 尚未执行，需包负责人先完成 npm 首次发布，再配置 Trusted Publisher 并用新版本 Tag 验证。
+实现提交：`5fe7a2f`；PR：[增加 Node.js npm 可信发布流程](https://github.com/jetlinks/jetlinks-api-sdk/pull/20)，目标分支 `2.0`。
 
 ## 资产范围便捷 API
 
