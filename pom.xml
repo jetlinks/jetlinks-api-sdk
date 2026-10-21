@@ -85,4 +85,43 @@
             </plugins>
         </pluginManagement>
     </build>
+    <profiles>
+        <profile>
+            <id>publish</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <version>3.1.4</version>
+                        <configuration>
+                            <!-- 所有 SDK 模块测试通过后再部署，避免后续模块失败时先上传部分制品。 -->
+                            <deployAtEnd>true</deployAtEnd>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+            <distributionManagement>
+                <snapshotRepository>
+                    <id>snapshots</id>
+                    <name>JetLinks Nexus Snapshots</name>
+                    <url>https://nexus.jetlinks.cn/content/repositories/snapshots/</url>
+                </snapshotRepository>
+            </distributionManagement>
+        </profile>
+    </profiles>
 </project>
