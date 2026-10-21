@@ -1,0 +1,79 @@
+name: Publish Node.js SDK
+
+on:
+  push:
+    tags: ['node-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# npm 版本不可覆盖；串行发布，避免多个发布同时更新 next/latest。
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'jetlinks/jetlinks-api-sdk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      dist_tag: ${{ steps.release.outputs.dist_tag }}
+    defaults:
+      run:
+        working-directory: sdk-nodejs
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: sdk-nodejs/package-lock.json
+      - run: npm install --global npm@11
+      - run: npm ci
+      - name: Validate release tag and distribution channel
+        id: release
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: node tools/release.mjs "$RELEASE_REF"
+      - run: npm run lint && npm test
+      - name: Pack verified SDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-package"
+          npm pack --pack-destination "$RUNNER_TEMP/npm-package"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nodejs-sdk
+          path: ${{ runner.temp }}/npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org/
+      - run: npm install --global npm@11
+      - uses: actions/download-artifact@v8
+        with:
+          name: nodejs-sdk
+          path: ${{ runner.temp }}/npm-package
+      - name: Publish verified tarball with npm trusted publishing
+        env:
+          DIST_TAG: ${{ needs.package.outputs.dist_tag }}
+        run: >-
+          npm publish "$RUNNER_TEMP/npm-package/"*.tgz
+          --access public --tag "$DIST_TAG" --provenance --ignore-scripts

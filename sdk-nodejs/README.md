@@ -1,8 +1,20 @@
 # Node.js SDK
 
+## 安装
+
+公开发布到 npmjs 后，用户无需 GitHub Token 或自定义 registry：
+
+```sh
+npm install @jetlinks/sdk-client@next
+# 稳定版发布后：npm install @jetlinks/sdk-client
+```
+
+`next` 用于 alpha/beta/rc/dev 等预发布版本，`latest` 用于稳定版。SDK 要求 Node.js 22+，支持 ES module 并附 TypeScript 类型。
+首次公开发布前，也可按下方说明从源码打包安装。
+
 ## 资产范围
 
-生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：
+生产环境请先阅读[客户端并发与对象复用](https://github.com/jetlinks/jetlinks-api-sdk/blob/2.0/docs/guides/examples.md#客户端并发与对象复用)：
 根客户端/管理器在同一事件循环内长期复用，options/body/迭代器按操作创建，临时范围视图通常无需额外缓存。
 
 ```js
@@ -25,7 +37,9 @@ try {
 SDK 通过 Undici request 发送独立的重复 Header，避免 Fetch 把范围合并为逗号列表，并保留压缩响应解码。
 资产范围不会改变 OAuth2 授权 Scope 或 Token 缓存键。平台负责最终权限校验，指定范围不会增加身份权限，与平台强制范围冲突时仍会拒绝。
 
-Node.js 22+，ES module，附 TypeScript 类型。当前从源码安装；示例使用 Node.js 22.13+ 的内置 SQLite。
+## 从源码运行示例
+
+示例使用 Node.js 22.13+ 的内置 SQLite。
 
 从仓库根目录运行：
 
@@ -39,7 +53,7 @@ node examples/smoke/platform-fixture.mjs
 node sdk-nodejs/examples/server.mjs example.local.json
 ```
 
-打开 `http://127.0.0.1:8090`，按[示例说明](../docs/guides/examples.md)触发首次通知。前端、配置和平台模拟服务与其他语言共用。
+打开 `http://127.0.0.1:8090`，按[示例说明](https://github.com/jetlinks/jetlinks-api-sdk/blob/2.0/docs/guides/examples.md)触发首次通知。前端、配置和平台模拟服务与其他语言共用。
 在自己的项目中可先执行 `npm --prefix sdk-nodejs pack`，再安装生成的 tgz；无须安装示例数据库或 Web 框架依赖。
 
 ```js
@@ -70,5 +84,45 @@ try {
 `CommandIds`、`EventTypes`、`Headers` 和标准资源/用量/配额类型直接复用平台契约。通知身份来自验签上下文，不能从 `event.data` 或 `subject` 推断。
 Header 签名和 RSA OAEP SHA-256 算法与 Java 一致；命令正文完整性依赖 HTTPS。
 
-[服务入口](examples/server.mjs)展示装配，[存储示例](examples/store.mjs)展示事务、去重和配额版本；SQLite 仅演示单进程。
+[服务入口](https://github.com/jetlinks/jetlinks-api-sdk/blob/2.0/sdk-nodejs/examples/server.mjs)展示装配，[存储示例](https://github.com/jetlinks/jetlinks-api-sdk/blob/2.0/sdk-nodejs/examples/store.mjs)展示事务、去重和配额版本；SQLite 仅演示单进程。
 验证：`npm --prefix sdk-nodejs test`；仓库根目录运行 `EXAMPLE_KINDS=nodejs node examples/smoke/local-test.mjs`。
+
+## 维护者：发布到 npmjs
+
+`.github/workflows/npm-publish.yml` 由 `node-v<version>` Tag 推送触发。Tag 必须与 `package.json` 中的规范 SemVer 完全一致，
+例如 `node-v2.0.0-alpha.1`；不接受分支、不同版本或 `+build` 元数据（npm 不用它区分版本）。
+预发布版本使用 `next`，稳定版使用 `latest`。已发布版本不能覆盖，每次发布都要更新 `package.json` 和 `package-lock.json`。
+先通过 PR 提交版本变化，再推送对应 Tag；工作流不会自动修改版本或创建 Tag。
+
+构建任务在 Node.js 24 上执行 lint、TypeScript 构建和测试并生成 tgz；独立发布任务只上传该 tgz，禁用生命周期脚本，
+通过 OIDC 可信发布并生成 provenance，不配置长期 `NPM_TOKEN`。发布串行执行，避免并发更新 `next` / `latest`。
+
+### 首次启用
+
+1. npm 包负责人确认拥有 npmjs 的 `@jetlinks` scope 发布权限。包尚不存在时，先在本地使用自己的 npm 登录完成一次发布：
+
+   ```sh
+   cd sdk-nodejs
+   npm ci
+   npm run lint && npm test
+   npm pack
+   npm login --registry=https://registry.npmjs.org/
+   npm publish ./jetlinks-sdk-client-2.0.0-alpha.0.tgz --access public --tag next --ignore-scripts
+   ```
+
+   文件名须对应实际版本；凭据只保存在发布者本机，不提交 `.npmrc` 或 Token。
+2. 在 npmjs 的包 **Settings → Trusted Publisher** 中选择 GitHub Actions，填写组织 `jetlinks`、仓库 `jetlinks-api-sdk`、
+   工作流文件名 `npm-publish.yml`（不含目录），Environment 留空，并允许直接 `npm publish`。
+   按 npm 当前规则，新配置须在两天内完成首次成功发布验证，过期后需重新配置。
+3. 合入工作流和新的包版本后，推送对应 Tag。首次本地发布的版本已被占用，首次 OIDC 发布须使用下一个版本。
+
+OIDC 需要 GitHub 托管 runner、Node.js 22.14+ 和 npm 11.5.1+；工作流使用 Node.js 24 和 npm 11。
+完整配置见 [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)。
+
+手动重试必须选择原 Tag，保证构建内容与 provenance 的提交一致；在仓库默认分支已有该工作流后运行：
+
+```sh
+gh workflow run npm-publish.yml --ref node-v2.0.0-alpha.1
+```
+
+在分支上手动运行会被版本校验拒绝；若该版本已经发布，npm 会拒绝重复发布，需更新版本后重新走发布流程。

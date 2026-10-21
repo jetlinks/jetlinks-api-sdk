@@ -10,6 +10,8 @@ Java、Node.js、Python 客户端，支持 API 应用和第三方业务应用接
 | Node.js | Node.js 22+，示例需 22.13+ | [Node.js 指南](sdk-nodejs/README.md) |
 | Python | Python 3.11+ | [Python 指南](sdk-python/README.md) |
 
+Node.js SDK 的公开 npm 安装、`next` / `latest` 渠道及维护者发布步骤见 [Node.js 安装与发布指南](sdk-nodejs/README.md#安装)。
+
 - 同步 `JetLinksClient`、响应式 `JetLinksReactiveClient` 共用协议与认证。
 - OAuth2、本地签名机器 Token、已有 Bearer Token。
 - 请求级资产范围与独立客户端范围视图，按组织、租户或自定义维度选择权限内资产。
