@@ -1,0 +1,6 @@
+{
+ "name":"jetlinks-sdk-example-ui","private":true,"version":"2.0.0",
+ "scripts":{"dev":"vite --host 127.0.0.1","test":"node --experimental-strip-types --test tests/*.test.mjs","typecheck":"vue-tsc --noEmit","lint":"eslint src","build":"vue-tsc --noEmit && vite build"},
+ "dependencies":{"vue":"3.5.13","ant-design-vue":"4.2.6"},
+ "devDependencies":{"@vitejs/plugin-vue":"5.2.1","vite":"6.1.0","typescript":"5.7.3","vue-tsc":"2.2.0","eslint":"9.20.1","eslint-plugin-vue":"9.32.0","@typescript-eslint/parser":"8.24.0"}
+}

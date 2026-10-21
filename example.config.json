@@ -1,0 +1,9 @@
+{
+ "host":"127.0.0.1",
+ "port":8090,
+ "publicBaseUrl":"http://127.0.0.1:8090",
+ "uiDir":"examples/shared-ui/dist",
+ "database":"./data/java-example",
+ "apiApplications":[],
+ "templates":[]
+}

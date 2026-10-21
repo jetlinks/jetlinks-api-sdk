@@ -1,0 +1,18 @@
+{
+  "name": "@jetlinks/sdk-client",
+  "version": "2.0.0-alpha.0",
+  "description": "JetLinks API 与第三方应用客户端",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "prettier --check src examples test",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "example": "node examples/server.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": { "decimal.js": "^10.6.0", "lossless-json": "^4.3.0", "undici": "^7.30.1" },
+  "devDependencies": { "@types/node": "^22.19.0", "typescript": "^5.9.3", "prettier": "^3.6.2" }
+}
