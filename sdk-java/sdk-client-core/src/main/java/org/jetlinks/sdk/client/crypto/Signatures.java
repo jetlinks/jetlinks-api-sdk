@@ -19,6 +19,9 @@ import javax.crypto.spec.*;
  * @since 2.0
  */
 public final class Signatures {
+    private static final PSSParameterSpec CREDENTIAL_SIGNATURE_PARAMETERS =
+            new PSSParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, 32, 1);
+
     private Signatures() {}
 
     public static byte[] hmac(byte[] secret, byte[] input) {
@@ -75,6 +78,13 @@ public final class Signatures {
     }
 
     public static String decrypt(String ciphertext, String privatePem) {
+        return decrypt(ciphertext, privateKey(privatePem));
+    }
+
+    /** 解析一次后复用不可变 RSA 私钥；仅接受 PKCS#8。 */
+    public static PrivateKey privateKey(String privatePem) {
+        if (privatePem == null || privatePem.isBlank())
+            throw new SdkException(Code.INVALID_ARGUMENT, "RSA private key is required");
         try {
             byte[] der =
                     Base64.getMimeDecoder()
@@ -82,8 +92,27 @@ public final class Signatures {
                                     privatePem
                                             .replace("-----BEGIN PRIVATE KEY-----", "")
                                             .replace("-----END PRIVATE KEY-----", ""));
-            PrivateKey key =
-                    KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
+            return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot parse RSA private key", e);
+        }
+    }
+
+    /** RSA-PSS SHA256，MGF1 SHA256，固定 32 字节 salt。 */
+    public static String signPss(PrivateKey key, String... fields) {
+        try {
+            Signature signer = Signature.getInstance("RSASSA-PSS");
+            signer.setParameter(CREDENTIAL_SIGNATURE_PARAMETERS);
+            signer.initSign(key);
+            signer.update(lp(fields));
+            return base64(signer.sign());
+        } catch (GeneralSecurityException e) {
+            throw new SdkException(Code.CRYPTOGRAPHY, "Cannot sign credential request", e);
+        }
+    }
+
+    public static String decrypt(String ciphertext, PrivateKey key) {
+        try {
             Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
             // 显式指定 MGF1 的 SHA-256，避免部分 JDK 在 OAEP SHA-256 下仍默认使用 SHA-1。
             cipher.init(

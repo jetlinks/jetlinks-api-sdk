@@ -12,6 +12,7 @@ Java、Node.js、Python 客户端，支持 API 应用和第三方业务应用接
 
 - 同步 `JetLinksClient`、响应式 `JetLinksReactiveClient` 共用协议与认证。
 - OAuth2、本地签名机器 Token、已有 Bearer Token。
+- 第三方模板 RSA 私钥证明主动获取实例凭据，关闭通知时也可接入；Java、Node.js、Python 同步/异步均支持。
 - 请求级资产范围与独立客户端范围视图，按组织、租户或自定义维度选择权限内资产。
 - 通知验签、持久受理扩展、多区域生命周期与凭据管理。
 - 授权码登录、成员/角色/授权事实、API 应用订阅、第三方 JSON/NDJSON 命令。

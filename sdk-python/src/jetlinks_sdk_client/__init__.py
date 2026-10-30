@@ -18,3 +18,8 @@ from .client import (
 )
 from .notification import NotificationVerifier, NotificationReceiver, apply_lifecycle
 from .command import CommandService, CommandResponse
+from .credential import (
+    BusinessApplicationCredentials,
+    AsyncBusinessApplicationCredentials,
+    ApplicationCredential,
+)

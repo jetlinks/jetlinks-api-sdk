@@ -1,5 +1,20 @@
 # Python SDK
 
+## 关闭通知时获取应用凭据
+
+平台模板登记 `configuration.credential = {keyId, publicKey}`；第三方持有可信 API 地址、templateId、applicationId 和 PKCS#8 PEM 私钥即可接入，无需通知签名 Secret 或已有 AccessSecret。
+
+```python
+from jetlinks_sdk_client import BusinessApplicationCredentials, JetLinksClient
+
+with BusinessApplicationCredentials(api_base_url, rsa_key_id, private_key_pem) as reader:
+    credential = reader.read(template_id, application_id, platform_id="")
+    with JetLinksClient.local(api_base_url, credential.access_key, credential.access_secret) as client:
+        context = client.authorization_context()
+```
+
+异步使用 `AsyncBusinessApplicationCredentials`、`async with` 和 `await reader.read(...)`。同步 reader 可在线程间复用，异步 reader 在所属事件循环内复用。SDK 生成随机 nonce/毫秒时间，以 RSA-PSS/SHA256（MGF1-SHA256，salt=32）证明模板私钥，检查响应全部身份和 nonce 后用 OAEP-SHA256 解密。platform_id 留空按模板 ID；模板配置显式值时必须传入。模板及实例均须启用，实例须属于模板。生产使用 HTTPS；传输保留网关前缀、不跟随重定向、不自动重试。400 为格式/过期，401 为认证/来源/状态拒绝，429/503 由调用方有界退避。只读请求在 ±60 秒窗口内可重试，不做 nonce 单次消费。应用密钥轮换或认证失败后再读取，普通调用复用当前凭据，勿记录 Secret。
+
 ## 资产范围
 
 生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：

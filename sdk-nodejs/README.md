@@ -1,5 +1,22 @@
 # Node.js SDK
 
+## 关闭通知时获取应用凭据
+
+先在平台模板 `configuration.credential` 登记 `{keyId, publicKey}`，无需已有 AccessSecret 或通知签名 Secret。私钥使用 PKCS#8 PEM，保留在第三方服务端。
+
+```js
+import { BusinessApplicationCredentials, JetLinksClient } from '@jetlinks/sdk-client';
+const reader = new BusinessApplicationCredentials(apiBaseUrl, rsaKeyId, privateKeyPem);
+try {
+  const credential = await reader.read(templateId, applicationId, platformId ?? '');
+  const client = JetLinksClient.local(apiBaseUrl, credential.accessKey, credential.accessSecret);
+  try { await client.authorizationContext(); }
+  finally { client.close(); }
+} finally { reader.close(); }
+```
+
+reader 可长期复用；每次读取生成新 nonce 和时间，执行 RSA-PSS/SHA256（MGF1-SHA256，salt=32），校验响应身份及 nonce 后用 OAEP-SHA256 解密。platformId 留空按模板 ID，显式配置时必须传配置值。应用与模板必须启用且归属匹配；可信 apiBaseUrl 保留网关前缀，生产使用 HTTPS。凭据仅在首次接入、轮换后或认证失败时有界刷新，平常复用。400 为格式/过期，401 为身份/来源/状态拒绝，429/503 可有界退避；SDK 不自动重试，不跟随重定向，不记录凭据。该只读签名在 ±60 秒内允许重试，不提供 nonce 单次消费保证。`keyRevision` 按现有精确 JSON 规则返回 number 或 Decimal。
+
 ## 资产范围
 
 生产环境请先阅读[客户端并发与对象复用](../docs/guides/examples.md#客户端并发与对象复用)：

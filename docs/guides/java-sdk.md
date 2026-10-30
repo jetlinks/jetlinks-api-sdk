@@ -9,6 +9,22 @@
 | API 应用 | 可信 API 地址、应用 ID、Access Key/Secret | 已配置的 Key/Secret |
 | 第三方业务应用 | 模板 platformId、模板 ID、通知 keyId/Secret、RSA 接收私钥 | 从验签后的生命周期通知解密取得 |
 
+关闭通知时，平台只需登记 `configuration.credential={keyId,publicKey}`。第三方知道可信 apiBaseUrl、templateId、applicationId 和自己的 RSA 私钥后，使用独立入口取凭据：
+
+```java
+import org.jetlinks.sdk.client.BusinessApplicationCredentials;
+
+try (var reader = new BusinessApplicationCredentials(apiBaseUrl, rsaKeyId, privateKeyPem)) {
+    // 响应式使用 read；同步应用可在非 I/O 线程等待。
+    var credential = reader.read(templateId, applicationId, "").block();
+    try (var client = JetLinksClient.local(apiBaseUrl, credential.accessKey(), credential.accessSecret())) {
+        var context = client.request(ApiRequest.get("/authorize/context"), AuthorizationContext.class);
+    }
+}
+```
+
+私钥为 ≥2048 bit PKCS#8 PEM，reader 可长期复用；每次订阅生成新 nonce 和时间。platformId 留空按模板 ID，模板显式配置时必须传配置值。SDK 固定 RSA-PSS/SHA256（MGF1-SHA256、salt=32），验证响应的身份、用途、nonce、keyId/revision 后用 OAEP-SHA256 解密。无需已有 Token/AccessSecret；模板和实例均须启用且归属匹配。400 为格式/过期，401 为认证/来源/状态拒绝，429/503 由调用方有界退避；不自动重试或跟随重定向。±60 秒内允许重复只读请求，不保证 nonce 单次消费。普通调用复用当前凭据，密钥轮换或认证失败后有界刷新，勿记录 Secret。生产使用 HTTPS，API 地址保留网关前缀。
+
 业务应用按 `(platformId, applicationId)` 保存记录，API 地址使用通知中的 `data.application.apiBaseUrl`，保留网关前缀。SDK 与平台均支持 HTTP/HTTPS，生产环境使用 HTTPS。`platformId` 对应平台模板配置，未配置时平台默认使用模板 ID。SDK 不发现区域，也不要求额外运维配置服务。
 
 API 应用没有 `X-Platform-Id`；连接多个平台且应用 ID 重复时，以本地配置的通道/地址隔离客户端和通知接收地址。
