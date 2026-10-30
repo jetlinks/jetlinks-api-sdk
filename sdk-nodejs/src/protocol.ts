@@ -122,7 +122,10 @@ export function encode(value: unknown): string {
     });
   }
 }
-export function decrypt(ciphertext: string, privateKey: string): string {
+export function decrypt(
+  ciphertext: string,
+  privateKey: string | crypto.KeyObject,
+): string {
   try {
     return crypto
       .privateDecrypt(
