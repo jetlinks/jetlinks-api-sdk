@@ -7,7 +7,18 @@ from dataclasses import dataclass, field
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from .client import JetLinksClient, AsyncJetLinksClient
-from .protocol import SdkError, lp, segment
+from .protocol import SdkError, decrypt, lp, segment
+
+_VERSION = "1"
+_USAGE = "credential.read"
+_REQUEST_DOMAIN = "business-application-credential/request"
+_MIN_RSA_KEY_BITS = 2048
+_MAX_ID_LENGTH = 64
+_MAX_PLATFORM_ID_LENGTH = 128
+_NONCE_BYTES = 16
+_SIGNATURE_PARAMETERS = padding.PSS(
+    mgf=padding.MGF1(hashes.SHA256()), salt_length=hashes.SHA256.digest_size
+)
 
 
 @dataclass(frozen=True)
@@ -18,8 +29,8 @@ class ApplicationCredential:
     key_revision: int
 
 
-class BusinessApplicationCredentials:
-    """拥有匿名传输客户端；不重试，私钥只解析一次。"""
+class _BusinessApplicationCredentials:
+    """共用签名与解密；同步和异步入口各自管理传输生命周期。"""
 
     client_type = JetLinksClient
 
@@ -35,7 +46,7 @@ class BusinessApplicationCredentials:
             not isinstance(key_id, str)
             or not key_id.strip()
             or not isinstance(self.key, rsa.RSAPrivateKey)
-            or self.key.key_size < 2048
+            or self.key.key_size < _MIN_RSA_KEY_BITS
         ):
             raise SdkError("INVALID_ARGUMENT", "Invalid RSA credential identity")
         self.key_id = key_id
@@ -44,46 +55,50 @@ class BusinessApplicationCredentials:
     def _request(self, template_id, application_id, platform_id):
         if (
             any(
-                not isinstance(v, str) or not v or v.strip() != v or len(v) > 64
+                not isinstance(v, str)
+                or not v
+                or v.strip() != v
+                or len(v) > _MAX_ID_LENGTH
                 for v in (template_id, application_id)
             )
             or not isinstance(platform_id, str)
-            or len(platform_id) > 128
-            or any(not 33 <= ord(c) <= 126 for c in platform_id)
+            or len(platform_id) > _MAX_PLATFORM_ID_LENGTH
+            or any(not "!" <= c <= "~" for c in platform_id)
         ):
             raise SdkError("INVALID_ARGUMENT", "Invalid credential request identity")
-        nonce, timestamp = secrets.token_urlsafe(16), int(time.time() * 1000)
+        nonce = secrets.token_urlsafe(_NONCE_BYTES)
+        timestamp = int(time.time() * 1000)
         expected = dict(
-            version="1",
+            version=_VERSION,
             platformId=platform_id or template_id,
             templateId=template_id,
             applicationId=application_id,
-            usage="credential.read",
+            usage=_USAGE,
             nonce=nonce,
             keyId=self.key_id,
         )
         content = lp(
             [
-                "business-application-credential/request",
+                _REQUEST_DOMAIN,
                 "POST",
-                "1",
+                _VERSION,
                 template_id,
                 application_id,
                 platform_id or template_id,
-                "credential.read",
+                _USAGE,
                 nonce,
                 str(timestamp),
             ]
         )
         signature = self.key.sign(
             content,
-            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
+            _SIGNATURE_PARAMETERS,
             hashes.SHA256(),
         )
         body = dict(
-            version="1",
+            version=_VERSION,
             platformId=platform_id,
-            usage="credential.read",
+            usage=_USAGE,
             nonce=nonce,
             timestamp=timestamp,
             sign=base64.urlsafe_b64encode(signature).decode().rstrip("="),
@@ -102,22 +117,16 @@ class BusinessApplicationCredentials:
             or value["keyRevision"] < 1
         ):
             raise SdkError("AUTHENTICATION", "Invalid credential response identity")
-        try:
-            secret = self.key.decrypt(
-                base64.b64decode(value["encryptedAccessSecret"], validate=True),
-                padding.OAEP(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None,
-                ),
-            ).decode()
-        except Exception as error:
-            raise SdkError("CRYPTOGRAPHY", "Cannot decrypt credential") from error
+        secret = decrypt(value["encryptedAccessSecret"], self.key)
         if not secret:
             raise SdkError("AUTHENTICATION", "Empty credential response")
         return ApplicationCredential(
             value["accessKey"], secret, self.key_id, value["keyRevision"]
         )
+
+
+class BusinessApplicationCredentials(_BusinessApplicationCredentials):
+    """拥有同步传输客户端；不重试，私钥只解析一次。"""
 
     def read(self, template_id, application_id, platform_id=""):
         path, body, expected = self._request(template_id, application_id, platform_id)
@@ -135,7 +144,9 @@ class BusinessApplicationCredentials:
         self.close()
 
 
-class AsyncBusinessApplicationCredentials(BusinessApplicationCredentials):
+class AsyncBusinessApplicationCredentials(_BusinessApplicationCredentials):
+    """只提供异步传输与上下文管理，避免同步 close 遗漏等待。"""
+
     client_type = AsyncJetLinksClient
 
     async def read(self, template_id, application_id, platform_id=""):

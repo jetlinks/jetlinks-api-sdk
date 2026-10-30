@@ -3,6 +3,13 @@ import { Decimal } from "decimal.js";
 import { JetLinksClient } from "./client.js";
 import { lp, segment, decrypt, SdkError } from "./protocol.js";
 
+const VERSION = "1";
+const USAGE = "credential.read";
+const REQUEST_DOMAIN = "business-application-credential/request";
+const MIN_RSA_KEY_BITS = 2048;
+const MAX_ID_LENGTH = 64;
+const NONCE_BYTES = 16;
+
 export interface ApplicationCredential {
   accessKey: string;
   accessSecret: string;
@@ -33,7 +40,7 @@ export class BusinessApplicationCredentials {
     if (
       !keyId?.trim() ||
       this.key.asymmetricKeyType !== "rsa" ||
-      (this.key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
+      (this.key.asymmetricKeyDetails?.modulusLength ?? 0) < MIN_RSA_KEY_BITS
     )
       throw new SdkError("INVALID_ARGUMENT", "Invalid RSA credential identity");
     this.client = new JetLinksClient(baseUrl);
@@ -49,7 +56,7 @@ export class BusinessApplicationCredentials {
           typeof v === "string" &&
           v.trim() === v &&
           v.length > 0 &&
-          v.length <= 64,
+          v.length <= MAX_ID_LENGTH,
       ) ||
       typeof platformId !== "string" ||
       !/^[!-~]{0,128}$/.test(platformId)
@@ -59,26 +66,26 @@ export class BusinessApplicationCredentials {
         "Invalid credential request identity",
       );
     const effective = platformId || templateId;
-    const nonce = crypto.randomBytes(16).toString("base64url");
+    const nonce = crypto.randomBytes(NONCE_BYTES).toString("base64url");
     const timestamp = Date.now();
     const sign = crypto
       .sign(
         "sha256",
         lp([
-          "business-application-credential/request",
+          REQUEST_DOMAIN,
           "POST",
-          "1",
+          VERSION,
           templateId,
           applicationId,
           effective,
-          "credential.read",
+          USAGE,
           nonce,
           String(timestamp),
         ]),
         {
           key: this.key,
           padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-          saltLength: 32,
+          saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
         },
       )
       .toString("base64url");
@@ -87,9 +94,9 @@ export class BusinessApplicationCredentials {
       {
         method: "POST",
         body: {
-          version: "1",
+          version: VERSION,
           platformId,
-          usage: "credential.read",
+          usage: USAGE,
           nonce,
           timestamp,
           sign,
@@ -97,11 +104,11 @@ export class BusinessApplicationCredentials {
       },
     );
     const expected = {
-      version: "1",
+      version: VERSION,
       platformId: effective,
       templateId,
       applicationId,
-      usage: "credential.read",
+      usage: USAGE,
       nonce,
       keyId: this.keyId,
     };

@@ -19,6 +19,9 @@ import javax.crypto.spec.*;
  * @since 2.0
  */
 public final class Signatures {
+    private static final PSSParameterSpec CREDENTIAL_SIGNATURE_PARAMETERS =
+            new PSSParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, 32, 1);
+
     private Signatures() {}
 
     public static byte[] hmac(byte[] secret, byte[] input) {
@@ -99,7 +102,7 @@ public final class Signatures {
     public static String signPss(PrivateKey key, String... fields) {
         try {
             Signature signer = Signature.getInstance("RSASSA-PSS");
-            signer.setParameter(new PSSParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, 32, 1));
+            signer.setParameter(CREDENTIAL_SIGNATURE_PARAMETERS);
             signer.initSign(key);
             signer.update(lp(fields));
             return base64(signer.sign());

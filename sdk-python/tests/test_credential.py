@@ -97,6 +97,9 @@ async def test_async_bootstrap_signs_and_decrypts():
     reader, mismatch, transport = fixture(AsyncBusinessApplicationCredentials)
     await reader.client._http.aclose()
     reader.client._http = httpx.AsyncClient(transport=transport)
+    with pytest.raises(TypeError):
+        with reader:
+            pytest.fail("async credentials must use async context management")
     async with reader:
         assert (
             await reader.read("template", "app")

@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode, urlsplit, unquote
 
 import simplejson
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 
 class SdkError(Exception):
@@ -124,8 +124,13 @@ def encode(value):
 
 
 def decrypt(ciphertext, private_key):
+    """RSA-OAEP SHA256；接受 PEM 字符串或已解析的 RSA 私钥。"""
     try:
-        key = serialization.load_pem_private_key(private_key.encode(), password=None)
+        key = (
+            private_key
+            if isinstance(private_key, rsa.RSAPrivateKey)
+            else serialization.load_pem_private_key(private_key.encode(), password=None)
+        )
         return key.decrypt(
             base64.b64decode(ciphertext, validate=True),
             padding.OAEP(
